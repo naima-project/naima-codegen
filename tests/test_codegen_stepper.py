@@ -250,6 +250,14 @@ class Policy(unittest.TestCase):
         codes, msgs = self._codes(lambda t: t.replace('order = ["c_give_up"', 'maps = """\nmap qfirst: Nat;\neqn qfirst = 0;\n"""\n\norder = ["c_give_up"'))
         self.assertIn("G9", codes, msgs)
 
+    def test_a_key_that_is_not_a_column_read_needs_its_sort(self):
+        spent = 'member = "st(j) == FAILED && tries(j) >= retries"\norder = "least"'
+        keyed = 'member = "st(j) == FAILED && tries(j) >= retries"\norder = "key"\nkey = "if(tries(j) > 1, 0, tries(j) + 1)"'
+        codes, msgs = self._codes(lambda t: t.replace(spent, keyed))
+        self.assertEqual(codes, ["G9"], msgs)
+        self.assertTrue(any("key_sort" in m for m in msgs), msgs)
+        self.assertEqual(self._codes(lambda t: t.replace(spent, keyed + '\nkey_sort = "Nat"')), ([], []))
+
     def test_a_name_starting_with_ix_is_g9(self):
         codes, msgs = self._codes(lambda t: t, lambda c: c.replace("spent", "ix_spent"))
         self.assertIn("G9", codes, msgs)

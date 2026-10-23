@@ -35,6 +35,7 @@ class Index:
     adm_var: str | None = None
     adm_when: str | None = None
     within: str | None = None  # order within: the index whose order this one takes (§3.7.6)
+    key_sort: str | None = None  # the sort of a key that is not a column read: Nat or Int (§3.7.6)
 
 
 @dataclass
@@ -93,11 +94,13 @@ def read_policy(text: str):
             problems.append((w, "§3.7.6", "a key is given exactly when the order is key"))
         if (ix["order"] == "within") != ("within" in ix):
             problems.append((w, "§3.7.6", "within is given exactly when the order is within"))
+        if "key_sort" in ix and ix["key_sort"] not in ("Nat", "Int"):
+            problems.append((w, "§3.7.6", "key_sort is Nat or Int"))
         if ("class" in ix) != ("admits" in ix):
             problems.append((w, "§3.7.6", "class and admits come together"))
         adm = ix.get("admits") or {}
         p.index[name] = Index(name, ix["sort"], ix["var"], ix["bound"], ix["member"], ix["order"], ix.get("key"),
-                              ix.get("class"), adm.get("var"), adm.get("when"), ix.get("within"))
+                              ix.get("class"), adm.get("var"), adm.get("when"), ix.get("within"), ix.get("key_sort"))
     p.maps = d.get("maps", "")
     p.defer = dict(d.get("defer", {}))
     return p, problems

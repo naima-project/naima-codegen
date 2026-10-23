@@ -763,7 +763,8 @@ An index `[index.<name>]` declares:
   no walk. Whatever a local predicate reads changes at a known id when it changes,
   and only that id needs to be looked at again. A predicate that is not local is G9.
 - `order`: `least` (least id first), `key` (least value of the term `key` first, a
-  local term of an integer sort; ties by least id), `newest` (the member that became
+  local term of an integer sort; ties by least id; a key that is not one column read
+  at the member variable gives its sort in `key_sort`, `Nat` or `Int`, else G9), `newest` (the member that became
   a member most recently first), `oldest` (the reverse), or `within` (the order of
   the index named by `within`). "Became a member" is the moment the predicate turned
   true at that id; an id that stays a member keeps its place.

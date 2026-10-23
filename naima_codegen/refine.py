@@ -511,12 +511,15 @@ def _index_infos(policy: Policy, ct: CoreText, params: dict, g) -> dict:
         xs = set(idents(term)) & set(params)
         return [n for n in order if n in xs]
 
-    def codomain(term, var, what, name):
+    def codomain(term, var, what, name, given=None):
         if term is None:
             return None
         m = re.fullmatch(r"\s*([A-Za-z_][\w']*)\s*\(\s*" + re.escape(var) + r"\s*\)\s*", term)
         if not m or m.group(1) not in params or "->" not in params[m.group(1)]:
-            g("G9", "index.%s" % name, "§3.7.6", "the %s must be a column read at %s, to know its sort" % (what, var))
+            if given is not None:
+                return given
+            g("G9", "index.%s" % name, "§3.7.6", "the %s must be a column read at %s, to know its sort%s"
+              % (what, var, ", or key_sort must give it" if what == "key" else ""))
             return None
         return params[m.group(1)].split("->", 1)[1].strip()
 
@@ -526,7 +529,7 @@ def _index_infos(policy: Policy, ct: CoreText, params: dict, g) -> dict:
         out[name] = IndexInfo(
             name, ix.sort, ct.ids[ix.sort], ix.order, args_of(ix.member), args_of(ix.cls), args_of(ix.key),
             args_of(ix.adm_when), args_of(ix.bound), codomain(ix.cls, ix.var, "class", name),
-            codomain(ix.key, ix.var, "key", name), "ix_%s" % name if ix.order in ("newest", "oldest") else None,
+            codomain(ix.key, ix.var, "key", name, ix.key_sort), "ix_%s" % name if ix.order in ("newest", "oldest") else None,
             ix.within)
         if ix.within is not None:
             j = policy.index.get(ix.within)
