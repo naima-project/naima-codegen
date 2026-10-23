@@ -24,6 +24,7 @@ import re
 from .expr import App, Bind, Num, Op, Var, Whr, show
 from .frontend import INIT_PREFIX
 from .functions import is_fun, mentions
+from .sortedlists import Sorted
 from .lower import Types, codec_desc, fun_params, g10, plan_summand, width_range
 
 from .header import block as _header_block  # noqa: E402
@@ -76,6 +77,46 @@ def _least(w):
     if not w:
         raise Undefined("least of an empty set")
     return min(w)
+
+
+# Whether the state being stepped audits (docs/spec.md §3.9.9): set by _stepper_init.
+_AUDIT = [False]
+
+
+def _place(t, u):
+    """The least i with t[i] >= u in a tuple sorted by id: a binary search."""
+    lo, hi = 0, len(t)
+    if hi and t[hi - 1] < u:
+        return hi
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if t[mid] < u:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def _ins_sorted(u, t, walk):
+    """An ordered insert into a tuple sorted by id (docs/spec.md §3.10.6), at the place
+    a binary search finds; with the audit on, checked against the model's walk."""
+    i = _place(t, u)
+    r = t if i < len(t) and t[i] == u else t[:i] + (u,) + t[i:]
+    if _AUDIT[0] and r != walk(u, t):
+        raise AuditFailed("an ordered insert differs from the model's walk")
+    return r
+
+
+def _merge_sorted(l, t, walk):
+    """An ordered merge of l into a tuple sorted by id (docs/spec.md §3.10.6)."""
+    r = t
+    for u in l:
+        i = _place(r, u)
+        if not (i < len(r) and r[i] == u):
+            r = r[:i] + (u,) + r[i:]
+    if _AUDIT[0] and r != walk(l, t):
+        raise AuditFailed("an ordered merge differs from the model's walk")
+    return r
 
 
 class _Index:
@@ -401,6 +442,8 @@ class Emitter:
         self.fun_maps = model.fun_maps
         self.walks = model.walks
         self.tmp = 0
+        # sorted per-id lists (docs/spec.md §3.10.6), set by emit
+        self.sorted = Sorted([model.lps], {}, {}, ())
 
     def fresh(self, base: str = "t") -> str:
         self.tmp += 1
@@ -638,10 +681,12 @@ class Emitter:
         text = "_m_%s(%s)" % (ident(name), ", ".join(args))
         return (text, defaults) if eager else text
 
-    def plan(self, fe, root: str, scope: dict, lines: list, indent: str, planvar: str):
+    def plan(self, fe, root: str, scope: dict, lines: list, indent: str, planvar: str, sorted_root: bool = False):
         """Lines that append to `planvar` the writes of a function expression built
         from `root` (§3.4.8), evaluating every index, value and condition now,
-        before anything is written (§3.8.4)."""
+        before anything is written (§3.8.4). With `sorted_root` (root a sorted
+        column, or a sorted walk's parameter, docs/spec.md §3.10.6), an ordered insert
+        or merge into root's own entry is done by a binary search."""
         stack = [("fe", fe, indent)]
         while stack:
             kind, x, ind = stack.pop()
@@ -653,7 +698,14 @@ class Emitter:
             h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
             if h == "@func_update":
                 i = self.expr(x.args[1], scope)
-                v = self.expr(x.args[2], scope)
+                up = self.sorted.update_value(x.args[2], x.args[1], root) \
+                    if sorted_root and isinstance(x.args[0], Var) and x.args[0].name == root else None
+                if up is not None:
+                    fn = "_ins_sorted" if up[0] == "ins" else "_merge_sorted"
+                    v = "%s(%s, %s, _m_%s)" % (fn, self.expr(up[1], scope), self.expr(x.args[2].args[1], scope),
+                                               ident(x.args[2].head.name))
+                else:
+                    v = self.expr(x.args[2], scope)
                 stack.append(("line", "%s.append((0, %s, %s))" % (planvar, i, v), ind))
                 stack.append(("fe", x.args[0], ind))
             elif h == "if":
@@ -802,7 +854,7 @@ class Emitter:
             return [ind + "_r = %s" % self.expr(x, scope)]
         root = w.params[w.ret_pos]
         pl = []
-        self.plan(x, root, scope, pl, ind, "_p")
+        self.plan(x, root, scope, pl, ind, "_p", sorted_root=self.sorted.walks.get(w.name) == w.ret_pos)
         return [ind + "_p = []"] + pl + [ind + "_r = _run(%s, _p)" % scope[root]]
 
     def _walk_continue(self, w, m, x, scope, ind) -> list:
@@ -818,7 +870,7 @@ class Emitter:
                 pv = self.fresh("p")
                 lines.append(ind + "%s = []" % pv)
                 pl = []
-                self.plan(a, p, scope, pl, ind, pv)
+                self.plan(a, p, scope, pl, ind, pv, sorted_root=self.sorted.walks.get(m.name) == j)
                 lines.extend(pl)
                 plans.append((scope[p], pv))
             else:
@@ -840,6 +892,8 @@ def emit(model, st=None) -> str:
     """The text of <generated>/python/<python_package>/__init__.py; with st (a
     `stepper.Stepper`), the stepper of the refined Core too (docs/spec.md §3.8)."""
     em = Emitter(st.model if st is not None else model)
+    em.sorted = Sorted([model.lps] + ([st.model.lps] if st is not None else []), em.walks, em.fun_maps,
+                       model.config.id_sorts)
     lps = model.lps
     lines = [HEADER.rstrip("\n"), '"""The model\'s generated code as Python (docs/spec.md §3.12)."""', RUNTIME]
     eqs: dict = {}
@@ -990,7 +1044,7 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, plan, watched: dict
             pv = "_p_" + ident(n)
             lines.append("    %s = []" % pv)
             pl = []
-            em.plan(e, n, scope, pl, "    ", pv)
+            em.plan(e, n, scope, pl, "    ", pv, sorted_root=n in em.sorted.columns)
             lines.extend(pl)
             plans[n] = pv
         else:
@@ -1133,7 +1187,7 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     for n, srt in lps.params:
         lines += _enc_param(em, n, srt)
     lines.append("    return bytes(out)")
-    init = ["    s._audit = audit"]
+    init = ["    s._audit = audit", "    _AUDIT[0] = audit"]
     for srt in sorts:
         init.append("    s._d_%s = []" % srt)
     for p, srt in sorted(st.watched.items()):

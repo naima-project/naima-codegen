@@ -55,6 +55,46 @@ def _least(w):
     return min(w)
 
 
+# Whether the state being stepped audits (docs/spec.md §3.9.9): set by _stepper_init.
+_AUDIT = [False]
+
+
+def _place(t, u):
+    """The least i with t[i] >= u in a tuple sorted by id: a binary search."""
+    lo, hi = 0, len(t)
+    if hi and t[hi - 1] < u:
+        return hi
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if t[mid] < u:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def _ins_sorted(u, t, walk):
+    """An ordered insert into a tuple sorted by id (docs/spec.md §3.10.6), at the place
+    a binary search finds; with the audit on, checked against the model's walk."""
+    i = _place(t, u)
+    r = t if i < len(t) and t[i] == u else t[:i] + (u,) + t[i:]
+    if _AUDIT[0] and r != walk(u, t):
+        raise AuditFailed("an ordered insert differs from the model's walk")
+    return r
+
+
+def _merge_sorted(l, t, walk):
+    """An ordered merge of l into a tuple sorted by id (docs/spec.md §3.10.6)."""
+    r = t
+    for u in l:
+        i = _place(r, u)
+        if not (i < len(r) and r[i] == u):
+            r = r[:i] + (u,) + r[i:]
+    if _AUDIT[0] and r != walk(l, t):
+        raise AuditFailed("an ordered merge differs from the model's walk")
+    return r
+
+
 class _Index:
     """An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class a heap
     of (order key, id) with lazy deletion; an entry is valid while its id is a
@@ -600,6 +640,7 @@ def _state_bytes(s):
 
 def _stepper_init(s, audit):
     s._audit = audit
+    _AUDIT[0] = audit
     if audit:
         _audit(s)
 

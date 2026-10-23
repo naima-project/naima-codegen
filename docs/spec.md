@@ -1207,10 +1207,13 @@ list moved or changed in place, §3.8.4), then the entry is changed by a binary 
 and an insert (`O(log k)` to find the place, and an append when the id is the
 greatest, as it is when ids are made in increasing order), and a sorted walk is given
 the column itself. The walk the model defines (`O(k)`, and a copy of the list) is
-emitted too and is used everywhere else. The cross-check of §3.16 compares this with
-the Python backend, which applies the model's walk.
+emitted too and is used everywhere else.
 
-Not implemented yet: the same in the Python backend.
+The Python backend, whose lists are tuples, finds the place by a binary search and
+builds the new tuple by slicing (a copy, made by the interpreter rather than by a walk
+of the list). In the oracle's audit mode (§3.9.9) every such insert and merge is also
+computed by the model's walk, and a difference is an audit failure, so the
+cross-check of §3.16 compares the Rust code with the model's own definition.
 
 ### 3.11 The Rust backend
 
