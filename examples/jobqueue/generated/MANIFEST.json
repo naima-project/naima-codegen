@@ -21,17 +21,18 @@
     "naima_codegen/__main__.py": "91a1938b6924036e98a7032ef2188a78fb6467ab6df6876b40443836ea26099d",
     "naima_codegen/aterm.py": "c412a1cdb5cf139db51e89bcea35f756ac2103b68b25c683254448b358d4018f",
     "naima_codegen/checks.py": "9e912229d0517842805331b8fe4c56fbc0d0633c21ccbb413db986ab93543508",
-    "naima_codegen/cli.py": "f5ebe5482a172812011f6cd60ab9688d5ec14bc174c9532090767ac8ee6d0542",
-    "naima_codegen/config.py": "10f67d3c761fce916a3ddcda6ad669e5089f2960b11f9ce13e322c40d8863d63",
+    "naima_codegen/cli.py": "f2c91410644d7ba6a7302ba25cd4f2f089f4dd3831de044905a435222f11cda4",
+    "naima_codegen/config.py": "ee88988381faea0d3e27ff7a839fc069114b25485ab5245b02aa04c04a1318f7",
     "naima_codegen/errors.py": "d567bb7bde05acb085aa0867ffbb56b7f2ccddc7aab2eb82357099724b9c4eca",
     "naima_codegen/evaluate.py": "6bff0cf0c273062497f75bc78aea9ffe1abe0f84a3754549bb49b31e9446b0e0",
     "naima_codegen/expr.py": "e7a2324e0470cd5a12569c5fc601341cda3ae09c3a8cc7420122461949985e8a",
     "naima_codegen/frontend.py": "0e0c8dcce918a7547551270d99ddbfc970d448314b165c4094c12ae1fc63b56e",
     "naima_codegen/functions.py": "8cf8fbb9aea0544aaf49724e465b354de90d6b3fda018a5dd8b912c849252c3d",
-    "naima_codegen/header.py": "c545202fc26a6a400591064480be77b3df5855ee88ab36b450bd9e053bfd4493",
+    "naima_codegen/header.py": "27691d8ebbb71f60bf17d243197058f9a6e89b0d8b881b823d0b8781d1d732ad",
+    "naima_codegen/layout.py": "ceae8ba91d21bddbfa0ac98b838b491b16c2573a9408575004bb1a043f01f2c0",
     "naima_codegen/lower.py": "55ad2b5d744a4e4a04c65bc103f39d2a26514e9553c9a1e0be7d2274a1d3cb95",
     "naima_codegen/lps.py": "4136574b761d57db2bf5d7a57911142651410d60843068abb5c66f07b11b5746",
-    "naima_codegen/outputs.py": "64c2875fb5586668a5767f602e28bff561e010212518eaf2e6193e89d71f0622",
+    "naima_codegen/outputs.py": "19ce6eedb488826bc1cbbee6072e9e3ee51d9b06ed494acef23103771a3e2797",
     "naima_codegen/policy.py": "8e6e45f3f71af347d94acebfd0c6a621a231fb5f391df5bd2b6f6e86ffe9e82a",
     "naima_codegen/project.py": "337a0f52400055c90b560625a603b0178604ef64749c6e288f2a0016372f0a40",
     "naima_codegen/pyback.py": "5b8ca3d66499ea70a9e6f4f761df955458b53981152f5f8275989d81a6d328d7",
@@ -57,7 +58,32 @@
     "model/observers.mcrl2": "ed7e2dc486f519c5b3bb86d1ae1891dfc193ae399d2a669391bb4cac087f0032",
     "model/policy.toml": "511e5000588e9dd16a07a7c546dca7caa8c0ec104338758d62a14d434eae461c"
   },
-  "layout": null,
+  "layout": {
+    "python": {
+      "Job": {
+        "bytes": 11,
+        "columns": {
+          "st": 1,
+          "tries": 1
+        },
+        "entries": {},
+        "index_bits": 3,
+        "stamps": 8
+      }
+    },
+    "rust": {
+      "Job": {
+        "bytes": 11,
+        "columns": {
+          "st": 1,
+          "tries": 1
+        },
+        "entries": {},
+        "index_bits": 3,
+        "stamps": 8
+      }
+    }
+  },
   "stepper": {
     "deferred": [],
     "indexes": [

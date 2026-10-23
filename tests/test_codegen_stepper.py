@@ -250,6 +250,29 @@ class Policy(unittest.TestCase):
         codes, msgs = self._codes(lambda t: t.replace('order = ["c_give_up"', 'maps = """\nmap qfirst: Nat;\neqn qfirst = 0;\n"""\n\norder = ["c_give_up"'))
         self.assertIn("G9", codes, msgs)
 
+    def test_the_per_id_layout_and_its_limit(self):
+        """§3.13.4: a job takes st (an enumeration, 1 byte), tries (u8, 1 byte), one bit for
+        each of the indexes retryable and spent and for the queue Q read by least (3 bits,
+        one byte), and the 8-byte stamps of retryable (oldest): 11 bytes; a limit below is G11."""
+        import json
+
+        from naima_codegen import outputs
+        from naima_codegen.errors import GeneratorError
+        from naima_codegen.project import load
+
+        lay = json.loads((EXAMPLE / "generated" / "MANIFEST.json").read_text())["layout"]
+        self.assertEqual(lay["rust"]["Job"], {"bytes": 11, "columns": {"st": 1, "tries": 1}, "entries": {},
+                                              "index_bits": 3, "stamps": 8})
+        d = _policy_root(lambda t: t)
+        try:
+            toml = d / "codegen.toml"
+            toml.write_text("bytes_per_id = { Job = 10 }\n" + toml.read_text())
+            with self.assertRaises(GeneratorError) as e:
+                outputs.build(load(d), run(d), PIN)
+            self.assertEqual([x.code for x in e.exception.diagnostics], ["G11"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
     def test_a_key_that_is_not_a_column_read_needs_its_sort(self):
         spent = 'member = "st(j) == FAILED && tries(j) >= retries"\norder = "least"'
         keyed = 'member = "st(j) == FAILED && tries(j) >= retries"\norder = "key"\nkey = "if(tries(j) > 1, 0, tries(j) + 1)"'

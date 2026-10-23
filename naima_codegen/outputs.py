@@ -24,7 +24,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import pyback, rustback, tsback
+from . import layout, pyback, rustback
 from .frontend import TOML
 
 
@@ -75,6 +75,14 @@ def build(proj, model, toolset: str, tools=None) -> dict:
         proj.m("instances/" + p.name) for p in proj.path(proj.m("instances")).glob("*.mcrl2")) if st is not None else []
     inputs = {f: _sha(proj.path(f).read_bytes())
               for f in [proj.m("core.mcrl2"), proj.m("codegen-init.mcrl2"), proj.toml, policy] + extra if proj.path(f).is_file()}
+    lay = layout.layout(model, st)
+    over = [(s, v["bytes"], model.config.bytes_per_id[s]) for s, v in lay["rust"].items()
+            if s in model.config.bytes_per_id and v["bytes"] > model.config.bytes_per_id[s]]
+    if over:
+        from .errors import Diagnostic, GeneratorError
+        raise GeneratorError([Diagnostic("G11", proj.toml, "bytes_per_id.%s" % s, "§3.13.4",
+                                         "the per-id layout takes %d bytes, over the limit %d" % (b, lim))
+                              for s, b, lim in over])
     manifest = {
         "generator": {k: _sha(p.read_bytes()) for k, p in generator_sources().items()},
         "toolset": toolset,
@@ -85,7 +93,7 @@ def build(proj, model, toolset: str, tools=None) -> dict:
                       "cost": costs.get(s.name, [])}
                      for s in model.lps.summands],
         "walks": sorted(model.walks),
-        "layout": None,
+        "layout": lay,
         "stepper": None if st is None else {
             "indexes": [{"name": ix.name, "sort": ix.sort, "order": ix.order, "classes": ix.classes, "reads": ix.watched}
                         for ix in st.indexes],

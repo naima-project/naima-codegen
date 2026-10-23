@@ -17,7 +17,7 @@ REPRS = ("bitset", "adj-fixed", "adj-append", "deque")
 KINDS = ("input", "output")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*$")
 
-_TOP = {"mcrl2_version", "parameter", "action", "id_sorts", "constants", "widths", "observable", "project", "systems", "cost_known"}
+_TOP = {"mcrl2_version", "parameter", "action", "id_sorts", "constants", "widths", "observable", "project", "systems", "cost_known", "bytes_per_id"}
 _PARAM = {"name", "role", "repr", "width", "sort", "init"}
 _ACTION = {"label", "kind", "args"}
 _OBS = {"name", "arg", "sort", "expr"}
@@ -45,6 +45,7 @@ class Config:
     project: dict = field(default_factory=dict)  # the [project] table, defaults filled in (§3.6.9)
     systems: dict = field(default_factory=dict)  # the [systems] table: groups, ids (§3.17)
     cost_known: list = field(default_factory=list)  # "<summand>: <kind> <parameter>" sites G8 still lets through
+    bytes_per_id: dict = field(default_factory=dict)  # id sort -> the limit of its per-id layout (G11, §3.13.4)
 
 
 def read_config(text: str) -> tuple[Config, list[tuple[str, str, str]]]:
@@ -59,6 +60,11 @@ def read_config(text: str) -> tuple[Config, list[tuple[str, str, str]]]:
     for k in sorted(set(data) - _TOP):
         problems.append((k, "§3.6", "unknown key %r" % k))
 
+    bp = data.get("bytes_per_id", {})
+    if not isinstance(bp, dict) or not all(isinstance(v, int) and v > 0 for v in bp.values()):
+        problems.append(("bytes_per_id", "§3.13.4", "a table of id sorts to positive integers"))
+    else:
+        cfg.bytes_per_id = dict(bp)
     ck = data.get("cost_known", [])
     if not isinstance(ck, list) or not all(isinstance(x, str) for x in ck):
         problems.append(("cost_known", "§3.13.1", "a list of strings"))
