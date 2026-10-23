@@ -8,6 +8,7 @@
 """The model's generated code as Python (docs/spec.md §3.12)."""
 
 import heapq
+from collections import deque
 
 class StepError(Exception):
     """An error of the generated code (docs/spec.md §3.14.2)."""
@@ -53,6 +54,13 @@ def _least(w):
     if not w:
         raise Undefined("least of an empty set")
     return min(w)
+
+
+def _dq_head(q):
+    """The head of a queue parameter (repr deque)."""
+    if not q:
+        raise Undefined("head")
+    return q[0]
 
 
 # Whether the state being stepped audits (docs/spec.md §3.9.9): set by _stepper_init.

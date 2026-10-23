@@ -32,6 +32,7 @@ HEADER = _header_block("#")
 
 RUNTIME = '''
 import heapq
+from collections import deque
 
 class StepError(Exception):
     """An error of the generated code (docs/spec.md §3.14.2)."""
@@ -77,6 +78,13 @@ def _least(w):
     if not w:
         raise Undefined("least of an empty set")
     return min(w)
+
+
+def _dq_head(q):
+    """The head of a queue parameter (repr deque)."""
+    if not q:
+        raise Undefined("head")
+    return q[0]
 
 
 # Whether the state being stepped audits (docs/spec.md §3.9.9): set by _stepper_init.
@@ -444,6 +452,9 @@ class Emitter:
         self.tmp = 0
         # sorted per-id lists (docs/spec.md §3.10.6), set by emit
         self.sorted = Sorted([model.lps], {}, {}, ())
+        # queue parameters (repr deque): a collections.deque in the state, read at its
+        # head, tailed and appended in place, as in the Rust backend
+        self.deques = {p.name for p in model.params if p.repr == "deque"}
 
     def fresh(self, base: str = "t") -> str:
         self.tmp += 1
@@ -463,7 +474,7 @@ class Emitter:
             if isinstance(x, Var):
                 if x.name not in scope:
                     raise g10("expression %s" % show(e)[:80], "variable %s is not in scope" % x.name)
-                out.append(scope[x.name])
+                out.append("tuple(%s)" % scope[x.name] if self._dq(x, scope) else scope[x.name])
                 continue
             if isinstance(x, Op):
                 out.append(self._const(x))
@@ -485,6 +496,10 @@ class Emitter:
             # App
             h = x.head
             hn = h.name if isinstance(h, Op) else None
+            q = self._dq_read(x, hn, scope)
+            if q is not None:
+                out.append(q)
+                continue
             if hn == "if" and len(x.args) == 3:
                 if not seen:
                     stack.append((x, True))
@@ -516,6 +531,23 @@ class Emitter:
                 continue
             out.append(self._app(x, hn, args))
         return out[-1]
+
+    def _dq(self, x, scope) -> bool:
+        """Whether x is a queue parameter of the state (repr deque)."""
+        return isinstance(x, Var) and x.name in self.deques and scope.get(x.name) == "s.%s" % ident(x.name)
+
+    def _dq_read(self, x, hn, scope):
+        """A read of a queue parameter in place: its head, its length, whether it is empty."""
+        a = x.args
+        if hn == "head" and len(a) == 1 and self._dq(a[0], scope):
+            return "_dq_head(%s)" % scope[a[0].name]
+        if hn == "#" and len(a) == 1 and self._dq(a[0], scope):
+            return "len(%s)" % scope[a[0].name]
+        if hn in ("==", "!=") and len(a) == 2:
+            for q, o in ((a[0], a[1]), (a[1], a[0])):
+                if self._dq(q, scope) and isinstance(o, Op) and o.name == "[]":
+                    return "(%slen(%s) == 0)" % ("" if hn == "==" else "not ", scope[q.name])
+        return None
 
     def ix_app(self, x, hn: str, scope: dict) -> str:
         """A selection operation of the refined Core (docs/spec.md §3.7.5): the
@@ -931,6 +963,8 @@ def emit(model, st=None) -> str:
             continue
         if r is not None:
             val = "_fit(%s, %d, %d, %r)" % (val, r[0], r[1], n)
+        if n in em.deques:
+            val = "deque(%s)" % val
         lines.append("    s.%s = %s" % (ident(n), val))
     lines.append("    return s")
     extra = _stepper_slots(st) if st is not None else []
@@ -1047,6 +1081,19 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, plan, watched: dict
             em.plan(e, n, scope, pl, "    ", pv, sorted_root=n in em.sorted.columns)
             lines.extend(pl)
             plans[n] = pv
+        elif n in em.deques:
+            t = "_n_" + ident(n)
+            hn = e.head.name if isinstance(e, App) and isinstance(e.head, Op) else None
+            if hn == "tail" and isinstance(e.args[0], Var) and e.args[0].name == n:
+                writes.append((n, ("pop", None)))
+            elif hn == "++" and isinstance(e.args[0], Var) and e.args[0].name == n:
+                lines.append("    %s = %s" % (t, em.expr(e.args[1], scope)))
+                writes.append((n, ("extend", t)))
+            elif isinstance(e, Var) and e.name == n:
+                pass
+            else:
+                lines.append("    %s = deque(%s)" % (t, em.expr(e, scope)))
+                writes.append((n, t))
         else:
             t = "_n_" + ident(n)
             lines.append("    %s = %s" % (t, em.expr(e, scope)))
@@ -1054,6 +1101,13 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, plan, watched: dict
     for n in plan.fun_order:
         lines.append("    _run(s.%s, %s)" % (ident(n), plans[n]))
     for n, t in writes:
+        if isinstance(t, tuple):
+            # a queue changed in place (repr deque)
+            if t[0] == "pop":
+                lines += ["    if not s.%s:" % ident(n), '        raise Undefined("tail")', "    s.%s.popleft()" % ident(n)]
+            else:
+                lines.append("    s.%s.extend(%s)" % (ident(n), t[1]))
+            continue
         r = width_range(model, n)
         if watched and n in watched:
             lines.append("    s._d_%s.extend(sorted(s.%s ^ %s))" % (watched[n], ident(n), t))
