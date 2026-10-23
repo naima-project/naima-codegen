@@ -115,6 +115,8 @@ pub trait Get<K, V> {
 pub trait GetSet<K, V>: Get<K, V> {
     fn set(&mut self, k: K, v: V);
     fn as_get(&self) -> &dyn Get<K, V>;
+    /// The value at k, to change in place (a sorted list's insert, docs/spec.md §3.10.6).
+    fn slot(&mut self, k: K) -> &mut V;
 }
 
 /// A stored function: a default and the entries that differ from it.
@@ -160,6 +162,10 @@ impl<K: Ord, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn as_get(&self) -> &dyn Get<K, V> {
         self
     }
+    fn slot(&mut self, k: K) -> &mut V {
+        let d = &self.d;
+        self.m.entry(k).or_insert_with(|| d.clone())
+    }
 }
 
 /// An overlay (docs/spec.md §3.4.8): the entries written over an unchanged view.
@@ -198,6 +204,10 @@ impl<K: Ord, V: Clone> GetSet<K, V> for Ov<'_, K, V> {
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
+    }
+    fn slot(&mut self, k: K) -> &mut V {
+        let b = self.b;
+        self.m.entry(k).or_insert_with_key(|k| b.get(k))
     }
 }
 
@@ -321,6 +331,13 @@ mod rt {
     /// least(W) (docs/spec.md §3.7.6).
     pub fn least<X: Ord + Clone>(s: &BTreeSet<X>) -> Result<X, StepError> {
         s.first().cloned().ok_or(StepError::Undefined("least of an empty set"))
+    }
+    /// An ordered insert into a list sorted by id (docs/spec.md §3.10.6): the
+    /// model's walk, at the place a binary search finds.
+    pub fn ins_sorted<X: Ord>(l: &mut Vec<X>, u: X) {
+        if let Err(p) = l.binary_search(&u) {
+            l.insert(p, u);
+        }
     }
 }
 

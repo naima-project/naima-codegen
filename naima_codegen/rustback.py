@@ -25,6 +25,7 @@ import re
 from .expr import App, Bind, Num, Op, Var, Whr, show, walk
 from .frontend import INIT_PREFIX
 from .functions import is_fun, mentions
+from .sortedlists import Sorted
 from .lower import Types, g10, plan_summand, width_range
 
 from .header import block as _header_block  # noqa: E402
@@ -149,6 +150,8 @@ pub trait Get<K, V> {
 pub trait GetSet<K, V>: Get<K, V> {
     fn set(&mut self, k: K, v: V);
     fn as_get(&self) -> &dyn Get<K, V>;
+    /// The value at k, to change in place (a sorted list's insert, docs/spec.md §3.10.6).
+    fn slot(&mut self, k: K) -> &mut V;
 }
 
 /// A stored function: a default and the entries that differ from it.
@@ -194,6 +197,10 @@ impl<K: Ord, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn as_get(&self) -> &dyn Get<K, V> {
         self
     }
+    fn slot(&mut self, k: K) -> &mut V {
+        let d = &self.d;
+        self.m.entry(k).or_insert_with(|| d.clone())
+    }
 }
 
 /// An overlay (docs/spec.md §3.4.8): the entries written over an unchanged view.
@@ -232,6 +239,10 @@ impl<K: Ord, V: Clone> GetSet<K, V> for Ov<'_, K, V> {
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
+    }
+    fn slot(&mut self, k: K) -> &mut V {
+        let b = self.b;
+        self.m.entry(k).or_insert_with_key(|k| b.get(k))
     }
 }
 
@@ -355,6 +366,13 @@ mod rt {
     /// least(W) (docs/spec.md §3.7.6).
     pub fn least<X: Ord + Clone>(s: &BTreeSet<X>) -> Result<X, StepError> {
         s.first().cloned().ok_or(StepError::Undefined("least of an empty set"))
+    }
+    /// An ordered insert into a list sorted by id (docs/spec.md §3.10.6): the
+    /// model's walk, at the place a binary search finds.
+    pub fn ins_sorted<X: Ord>(l: &mut Vec<X>, u: X) {
+        if let Err(p) = l.binary_search(&u) {
+            l.insert(p, u);
+        }
     }
 }
 
@@ -566,6 +584,8 @@ class Emitter:
         self.borrows = {}
         # applications whose operands after the moved one are evaluated first: {id(App): moved position}
         self.hoists = {}
+        # sorted per-id lists (docs/spec.md §3.10.6), set by emit
+        self.sorted = Sorted([model.lps], {}, {}, ())
 
     def fresh(self, base: str) -> str:
         self.n += 1
@@ -1263,10 +1283,12 @@ class Emitter:
             else:
                 raise g10("function expression %s" % show(x)[:80], "no Rust for it")
 
-    def collect_writes(self, fe, wvar: str, scope: dict, lines: list, ind: str):
+    def collect_writes(self, fe, wvar: str, scope: dict, lines: list, ind: str, acc: str | None = None):
         """Statements that push onto `wvar` the writes of a function expression, every
         index, value and condition evaluated before any is applied (inside a walk,
-        where the leaves read the accumulator itself)."""
+        where the leaves read the accumulator itself). With `acc`, the walk's sorted
+        parameter (docs/spec.md §3.10.6): its ordered inserts are pushed onto `wvar`i
+        as (key, id), to apply in place."""
         stack = [("fe", fe, ind)]
         while stack:
             kind, x, i = stack.pop()
@@ -1276,7 +1298,14 @@ class Emitter:
             if isinstance(x, Var):
                 continue
             h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
-            if h == "@func_update":
+            up = self.sorted.update_value(x.args[2], x.args[1], acc) \
+                if acc is not None and h == "@func_update" and isinstance(x.args[0], Var) and x.args[0].name == acc else None
+            if up is not None and up[0] == "ins":
+                stack.append(("line", "%si.push((%s, %s));" % (wvar, self.expr(x.args[1], scope), self.expr(up[1], scope)), i))
+            elif up is not None:
+                stack.append(("line", "{ let k = %s; for x in %s { %si.push((k.clone(), x)); } }"
+                              % (self.expr(x.args[1], scope), self.expr(up[1], scope), wvar), i))
+            elif h == "@func_update":
                 stack.append(("line", "%s.push((%s, %s));" % (wvar, self.expr(x.args[1], scope), self.expr(x.args[2], scope)), i))
                 stack.append(("fe", x.args[0], i))
             elif h == "if":
@@ -1478,10 +1507,15 @@ class Emitter:
             self.moves, self.hoists = {}, {}
             return [ind + "break %s;" % code]
         target = "v_" + ident(w.params[w.ret_pos])
+        acc = w.params[w.ret_pos] if m is not None and self.sorted.walks.get(m.name) == w.ret_pos else None
         lines = [ind + "let mut wr: Vec<_> = Vec::new();"]
-        self.collect_writes(x, "wr", self._vals(scope), lines, ind)
-        lines += [ind + "for (k, v) in wr {", ind + "    %s.set(k, v);" % target, ind + "}", ind + "break ();"]
-        return lines
+        if acc is not None:
+            lines.append(ind + "let mut wri: Vec<_> = Vec::new();")
+        self.collect_writes(x, "wr", self._vals(scope), lines, ind, acc)
+        lines += [ind + "for (k, v) in wr {", ind + "    %s.set(k, v);" % target, ind + "}"]
+        if acc is not None:
+            lines += [ind + "for (k, u) in wri {", ind + "    rt::ins_sorted(%s.slot(k), u);" % target, ind + "}"]
+        return lines + [ind + "break ();"]
 
     @staticmethod
     def _vals(scope: dict) -> dict:
@@ -1501,16 +1535,21 @@ class Emitter:
                 self.moves = self._walk_moves(m, w, a, {p})
             if is_fun(self.lps, m.sort[1][j]):
                 wv = self.fresh("wc")
+                acc = p if self.sorted.walks.get(m.name) == j else None
                 lines.append(ind + "let mut %s: Vec<_> = Vec::new();" % wv)
-                self.collect_writes(a, wv, scope, lines, ind)
-                writes.append(("v_" + ident(p), wv))
+                if acc is not None:
+                    lines.append(ind + "let mut %si: Vec<_> = Vec::new();" % wv)
+                self.collect_writes(a, wv, scope, lines, ind, acc)
+                writes.append(("v_" + ident(p), wv, acc is not None))
             else:
                 t = self.fresh("t")
                 lines.append(ind + "let %s = %s;" % (t, self.expr(a, scope)))
                 temps.append(("v_" + ident(p), t))
             self.moves, self.hoists = {}, {}
-        for v, wv in writes:
+        for v, wv, ins in writes:
             lines += [ind + "for (k, v) in %s {" % wv, ind + "    %s.set(k, v);" % v, ind + "}"]
+            if ins:
+                lines += [ind + "for (k, u) in %si {" % wv, ind + "    rt::ins_sorted(%s.slot(k), u);" % v, ind + "}"]
         for v, t in temps:
             lines.append(ind + "%s = %s;" % (v, t))
         lines += [ind + "i = i.saturating_add(1);", ind + "continue;"]
@@ -1561,6 +1600,8 @@ def emit(model, st=None, package: str = "generated", workspace: bool = False) ->
     """The files of <generated>/rust/<rust_crate>: {relative path: text}; with st (a
     `stepper.Stepper`), the stepper of the refined Core too (docs/spec.md §3.8)."""
     em = Emitter(st.model if st is not None else model)
+    em.sorted = Sorted([model.lps] + ([st.model.lps] if st is not None else []), em.walks, em.fun_maps,
+                       model.config.id_sorts)
     lps = model.lps
     out = [HEADER.rstrip("\n"), "//! The model's generated code (docs/spec.md §3.11).", RUNTIME]
     out += em.emit_types()
@@ -1749,9 +1790,11 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
     """The next state: overlays and new values first, then the writes (§3.8.4); a
     write to what an index reads dirties its id (docs/spec.md §3.8.3)."""
     lines = []
-    commits, writes, deferred = [], [], []
+    commits, writes, deferred, inplace = [], [], [], []
     for n, e in s.assigns:
-        if n in fps:
+        if n in fps and _inplace(em, model, s, n, e, fps, watched):
+            inplace.append((n, e))
+        elif n in fps:
             o = "o_" + ident(n)
             lines.append("    let mut %s = Ov::over(&s.%s);" % (o, ident(n)))
             em.apply_fe(e, o, scope, lines, "    ")
@@ -1787,6 +1830,10 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
             t = "n_" + ident(n)
             lines.append("    let %s = %s;" % (t, em.expr(e, scope)))
             writes.append((n, t))
+    # A sorted per-id list is changed in place (docs/spec.md §3.10.6), after every other
+    # value that reads the old state has been computed and before any is moved out of it.
+    for n, e in inplace:
+        _apply_inplace(em, n, e, scope, lines)
     # A set or list given a new value here is moved, not copied, into the one expression
     # that consumes it (its own new value, or another's: `X := X + Y, Y := {}`), once
     # every other expression that reads it has been evaluated: the step then costs what
@@ -1850,6 +1897,55 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
                       "        s.dirty_%s.push(x.0);" % watched[n], "    }"]
         lines.append("    s.%s = %s;" % (ident(n), t if r is None else 'rt::fit(%s, %d, %d, "%s")?' % (t, r[0], r[1], n)))
     return lines
+
+
+def _inplace(em, model, s, n, e, fps: set, watched) -> bool:
+    """Whether the new value of the function parameter n is applied in place: n is a
+    sorted column (docs/spec.md §3.10.6), no index reads it, and every other new value
+    of the summand that reads it is computed before the change (see _fire_body: all
+    but those of sets and lists moved or changed in place, computed after it)."""
+    srt = em.sorted
+    if n not in srt.columns or (watched and n in watched) or not srt.preserves(e, n, srt.columns, srt.walks):
+        return False
+    for m2, e2 in s.assigns:
+        if m2 == n or not _occurs(e2, n):
+            continue
+        late = m2 not in fps and m2 not in em.deques and (
+            _set_inplace(em, model, m2, e2) is not None or (_movable(em, model, m2) and not (watched and m2 in watched)))
+        if late or m2 in srt.columns:
+            return False
+    return True
+
+
+def _apply_inplace(em, n: str, e, scope: dict, lines: list) -> None:
+    """Statements that change the sorted column n in place to its new value e: an
+    ordered insert or merge at one key, or a sorted walk given the column itself."""
+    col = "s.%s" % ident(n)
+    stack = [("fe", e, "    ")]
+    while stack:
+        kind, x, i = stack.pop()
+        if kind == "line":
+            lines.append(i + x)
+            continue
+        if isinstance(x, Var):
+            continue
+        h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
+        if h == "if":
+            stack.append(("line", "}", i))
+            stack.append(("fe", x.args[2], i + "    "))
+            stack.append(("line", "} else {", i))
+            stack.append(("fe", x.args[1], i + "    "))
+            stack.append(("line", "if %s {" % em.expr(x.args[0], scope), i))
+        elif h == "@func_update":
+            kind2, v = em.sorted.update_value(x.args[2], x.args[1], n)
+            k = em.expr(x.args[1], scope)
+            if kind2 == "ins":
+                lines.append(i + "{ let k = %s; let u = %s; rt::ins_sorted(%s.slot(k), u); }" % (k, em.expr(v, scope), col))
+            else:
+                lines.append(i + "{ let k = %s; let l = %s; if !l.is_empty() { let t = %s.slot(k); for x in l { rt::ins_sorted(t, x); } } }"
+                             % (k, em.expr(v, scope), col))
+        else:
+            lines.append(i + "{ %s?; }" % em.call(x, scope, target="&mut %s" % col))
 
 
 def _occurs(e, name: str) -> bool:

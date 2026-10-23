@@ -11,7 +11,7 @@
     "model/systems/small-refined.mcrl2": "c22d31b8a2a78e932a557cf589f930958a19250ad440c9670556fd37704ad0b3",
     "python/jobqueue/__init__.py": "4be099cc72f44334bb2bb26e328a7bee926d067b2b702f81ee83bd4bd880db50",
     "rust/jobqueue/Cargo.toml": "0e997e389e900e971ff195676ba3cea464fb39b7997a45f8042534e64c37a1ef",
-    "rust/jobqueue/src/lib.rs": "1fbdbd24a05667c05f4757be36e14a8a241372989bf1aadf51020460f58bd2c7",
+    "rust/jobqueue/src/lib.rs": "507fd6188c3a3e2350bf706b8b7d044b99577632168a3a0136ea58777c1857c8",
     "typescript/jobqueue/jobqueue.svelte.ts": "674ee40a1aef46cc00d8264cf790ad4f2e614c3441652bb06f10033513eb4579",
     "typescript/jobqueue/jobqueue.ts": "b6bd8f77635ee53c7c98f5498421cb8d24b8e42af831f9dd9291408bc6ff2afa"
   },
@@ -37,7 +37,8 @@
     "naima_codegen/pyback.py": "c1ba70443e030fe896ca2caa309939625bfd25bd5a73a88cbb96b08518bd06af",
     "naima_codegen/refine.py": "3114c3261d6b83c3f3ae316df71ed69b098a3d3236a8cc1fd2837bf062ae12fe",
     "naima_codegen/render.py": "8a5f47bd336590430275ece48c3c09e3a5f79c88e4bac24d5ca44e910bf1efff",
-    "naima_codegen/rustback.py": "483157147be91499225493993863a8c687234df9f7e302e787621e1fce5aa096",
+    "naima_codegen/rustback.py": "ca95c1d6cf2231d2c0615f39e086552c25dfdc2f0e37740124f051fa60320026",
+    "naima_codegen/sortedlists.py": "4c17dc704cb824c4803db29e7d1e0fa2cbbd2186775c6b6a81ff8717564ea4b5",
     "naima_codegen/source.py": "df13d79547280ceda93475354652579263db29153abe01c54441b6bc4f8501d2",
     "naima_codegen/stepper.py": "f404106182e721cf5df870884aae4be5ad4428c8841d2c23772ef6f799fb10ee",
     "naima_codegen/systems.py": "641e10ccb7090dd126af819923466d95285d83182f5fe971f0b67d352b64b080",

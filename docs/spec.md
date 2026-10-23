@@ -1177,6 +1177,41 @@ breaks every tie by the least id, and its stamps count entries in the order the
 summands make them, which every backend follows. This is what lets the backends,
 with different hash functions, take the same actions.
 
+#### 3.10.6 Sorted per-id lists
+
+A model may keep, per id, a list of ids as a set ordered by id: it starts empty and
+grows only through an *ordered insert*, a user map whose equations are exactly
+
+    f(u, []) = [u];
+    f(u, n |> l) = if(u == n, n |> l, if(p(u) < p(n), u |> (n |> l), n |> f(u, l)));
+
+(`p` the one field of the id sort, §3.3.3), or an *ordered merge* through it:
+
+    g([], l2) = l2;
+    g(n |> l, l2) = g(l, f(n, l2));
+
+The generator recognises both from their equations (variable names aside). A column
+`P: I -> List(I)` is *sorted* when its initial value is the constant `[]` and the new
+value every summand gives it is, on each path of its `if`s, `P` itself, `P` with one
+entry `k` updated to `f(u, P(k))` or `g(l, P(k))`, or a call of a *sorted walk* with `P`
+at its function-sorted result's position and nowhere else. A sorted walk (§3.4.8) is
+one whose every step leaves that parameter in the same form, and which is called
+nowhere but there. These conditions are a greatest fixpoint, taken over the summands
+of the Core and of the stepper Core. By induction on the run, every value of a sorted
+column is sorted by id, and on a sorted list `f(u, l)` is `l` with `u` at the place a
+binary search finds (unchanged when `u` is in it).
+
+The Rust backend applies such an update in place: the summand's other new values are
+computed first (all of them that read the column, which must not include a set or
+list moved or changed in place, §3.8.4), then the entry is changed by a binary search
+and an insert (`O(log k)` to find the place, and an append when the id is the
+greatest, as it is when ids are made in increasing order), and a sorted walk is given
+the column itself. The walk the model defines (`O(k)`, and a copy of the list) is
+emitted too and is used everywhere else. The cross-check of §3.16 compares this with
+the Python backend, which applies the model's walk.
+
+Not implemented yet: the same in the Python backend.
+
 ### 3.11 The Rust backend
 
 #### 3.11.1 The crate
