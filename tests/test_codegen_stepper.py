@@ -261,7 +261,7 @@ class Policy(unittest.TestCase):
         from naima_codegen.project import load
 
         lay = json.loads((EXAMPLE / "generated" / "MANIFEST.json").read_text())["layout"]
-        self.assertEqual(lay["rust"]["Job"], {"bytes": 11, "columns": {"st": 1, "tries": 1}, "entries": {},
+        self.assertEqual(lay["rust"]["Job"], {"bytes": 11, "columns": {"st": 1, "tries": 1}, "entries": {}, "bit_columns": [],
                                               "index_bits": 3, "stamps": 8})
         d = _policy_root(lambda t: t)
         try:

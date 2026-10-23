@@ -1421,8 +1421,8 @@ limit in bytes per id, which G11 enforces on the columns, and its measurement on
 large run are the project's.
 
 The layout is computed from the representations of §3.10.3, whatever the backends
-emit today: a column takes one value of its sort at its width (§3.6.6; `Bool` and an
-enumeration one byte, an id sort `u32`, a record the sum of its fields, a union a tag
+emit today: a column takes one value of its sort at its width (§3.6.6; a column of `Bool`
+is a bitset, one bit per id, listed under `bit_columns`; an enumeration one byte, an id sort `u32`, a record the sum of its fields, a union a tag
 byte and its largest constructor), a column of lists or sets eight bytes (start and
 length) plus the entries' bytes, listed under `entries`; bits are rounded up to whole
 bytes. The manifest's `layout` has a table per backend (the same today) and per id sort:

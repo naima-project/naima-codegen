@@ -4,7 +4,7 @@ to (§3.6.8).
 
 Per id: a column `I -> X` takes the bytes of one `X` at its width (§3.6.6: a declared
 width, else the sort's default, `u64` for `Nat` and `Pos`, `i64` for `Int`, `u32` for an id
-sort); `Bool` and an enumeration take one byte, a record the sum of its fields, a union
+sort); a column of `Bool` is a bitset, one bit per id; an enumeration takes one byte, a record the sum of its fields, a union
 one byte of tag and its largest constructor's fields. A column of lists or sets of ids is a
 per-id list: start and length, eight bytes per id, and the bytes of each entry, shown
 separately. Every index over the sort adds one bit per id (its membership), eight bytes for
@@ -66,12 +66,15 @@ class Layout:
                                 and x.args and isinstance(x.args[0], Var):
                             least.add(x.args[0].name)
         for idsort in self.ids:
-            cols, entries = {}, {}
+            cols, entries, bools = {}, {}, []
             for n, srt in self.lps.params:
                 s = self.types.resolve(srt)
                 if s[0] != "->" or len(s[1]) != 1 or self.types.resolve(s[1][0]) != ("id", idsort):
                     continue
                 p = self.params.get(n)
+                if self.types.resolve(s[2]) == ("id", "Bool"):
+                    bools.append(n)  # a column of Bool is a bitset: one bit per id
+                    continue
                 b, e = self.value_bytes(s[2], getattr(p, "width", None))
                 cols[n] = b
                 if e:
@@ -85,9 +88,9 @@ class Layout:
             for n, srt in self.lps.params:
                 if n in least and self.types.resolve(srt) == ("FSet", ("id", idsort)):
                     bits += 1
-            total = sum(cols.values()) + (bits + 7) // 8 + stamps
+            total = sum(cols.values()) + (bits + len(bools) + 7) // 8 + stamps
             out[idsort] = {"columns": dict(sorted(cols.items())), "entries": dict(sorted(entries.items())),
-                           "index_bits": bits, "stamps": stamps, "bytes": total}
+                           "bit_columns": sorted(bools), "index_bits": bits, "stamps": stamps, "bytes": total}
         return out
 
 

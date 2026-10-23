@@ -29,7 +29,7 @@
     "naima_codegen/frontend.py": "0e0c8dcce918a7547551270d99ddbfc970d448314b165c4094c12ae1fc63b56e",
     "naima_codegen/functions.py": "8cf8fbb9aea0544aaf49724e465b354de90d6b3fda018a5dd8b912c849252c3d",
     "naima_codegen/header.py": "27691d8ebbb71f60bf17d243197058f9a6e89b0d8b881b823d0b8781d1d732ad",
-    "naima_codegen/layout.py": "ceae8ba91d21bddbfa0ac98b838b491b16c2573a9408575004bb1a043f01f2c0",
+    "naima_codegen/layout.py": "0837de68267bc4585bb9aba1122b13160d6809531aa412e38861fb4157feebbd",
     "naima_codegen/lower.py": "55ad2b5d744a4e4a04c65bc103f39d2a26514e9553c9a1e0be7d2274a1d3cb95",
     "naima_codegen/lps.py": "4136574b761d57db2bf5d7a57911142651410d60843068abb5c66f07b11b5746",
     "naima_codegen/outputs.py": "19ce6eedb488826bc1cbbee6072e9e3ee51d9b06ed494acef23103771a3e2797",
@@ -61,6 +61,7 @@
   "layout": {
     "python": {
       "Job": {
+        "bit_columns": [],
         "bytes": 11,
         "columns": {
           "st": 1,
@@ -73,6 +74,7 @@
     },
     "rust": {
       "Job": {
+        "bit_columns": [],
         "bytes": 11,
         "columns": {
           "st": 1,
