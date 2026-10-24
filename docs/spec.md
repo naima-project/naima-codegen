@@ -190,8 +190,14 @@ Only the files of the backends the project table names are written (§3.6.9).
 Not implemented yet: `src/py.rs` (§3.11.4).
 
 3.1.3. Nothing under `<generated>` is edited by hand. Every generated file starts
-with a comment that says so and names `<generated>/MANIFEST.json`; §3.15 detects
-any edit.
+with a comment block, in the file's comment syntax, that says: the file is
+generated, by naima-codegen, from the model's `core.mcrl2`, `codegen.toml` and
+`policy.toml`, naming `MANIFEST.json` in the generated directory; that any edit is
+lost at the next generation and fails `naima-codegen generate --check` (§3.15);
+and what to do instead: change the model, check it, run `naima-codegen generate`,
+and commit the model and the generated directory together. §3.15 detects any edit;
+a project's build may run `generate --check` first and refuse to build while the
+generated directory differs from what the model generates.
 
 3.1.4. The generator reads no other file, no environment variable and no clock,
 so that the same inputs give the same outputs on every machine (§3.15.1). The
@@ -698,7 +704,8 @@ copied verbatim. It can therefore replace `<model>/core.mcrl2` in any system
    `pick(job(12))` from `{job(7), job(3), job(12)}`). For an index of order `least`
    or `key`, `first(I)` and `some(I)` are such searches over the ids
    `0 … bound − 1`, with the parameters the index reads passed as arguments; for an
-   index of order `newest` or `oldest`, they are walks over the index's list (3).
+   index of order `newest` or `oldest`, they are walks over the index's list (3); for an index of order `within` (4), walks over
+   the list of the index it is within.
 3. For every index of order `newest` or `oldest`, a parameter `ix_<name>: List(I)`,
    initially `[]`, holding the members in index order (newest first, or oldest
    first), and, in every summand that writes a parameter the index's predicate or
@@ -709,6 +716,14 @@ copied verbatim. It can therefore replace `<model>/core.mcrl2` in any system
    writes must be visible in its assignments: function updates `f[x -> v]`, possibly
    under `if`, and `+ {x}`, `- {x}` on a set. A parameter read by such an index and
    written in any other way (by a walk, by a whole-set operation) is G13.
+
+4. For an index `I` of order `within`, `within = "J"`, no parameter: `first(I)` and
+   `some(I)` walk `ix_J`, the list of `J` (item 3), and stop at the first id at
+   which `I`'s membership predicate holds and its class is admitted. As `I`'s
+   predicate has `J`'s as a conjunct (§3.7.6), every member of `I` is in `ix_J`,
+   and the walk sees `I`'s members in `J`'s order. Nothing keeps a list for `I`,
+   so a summand may write what `I`'s predicate reads by any operation (by a walk,
+   by a whole-set operation): only `J`'s predicate is held to item 3.
 
 The refined summands are printed from the generator's internal form, with the
 recovered names of §3.5.3, in policy order for outputs and source order for inputs.
@@ -748,10 +763,16 @@ An index `[index.<name>]` declares:
   no walk. Whatever a local predicate reads changes at a known id when it changes,
   and only that id needs to be looked at again. A predicate that is not local is G9.
 - `order`: `least` (least id first), `key` (least value of the term `key` first, a
-  local term of an integer sort, ties by least id), `newest` (the member that became
-  a member most recently first) or `oldest` (the reverse). "Became a member" is the
-  moment the predicate turned true at that id; an id that stays a member keeps its
-  place.
+  local term of an integer sort; ties by least id), `newest` (the member that became
+  a member most recently first), `oldest` (the reverse), or `within` (the order of
+  the index named by `within`). "Became a member" is the moment the predicate turned
+  true at that id; an id that stays a member keeps its place.
+- `within`: given exactly when the order is `within`; the name of an index `J` of
+  the same sort and bound, of order `newest` or `oldest`, whose membership predicate
+  is a top-level conjunct of this index's (written first: `member = "<J's member>
+  && ..."`), so that every member of this index is a member of `J`. The members are
+  then ordered as in `J`: for `J` of order `newest`, the member that became a member
+  of `J` most recently first. Anything else is G9.
 - `class` and `admits`: optional, together. `class` is a local term of an
   enumeration sort `K`; `admits = { var = "k", when = "<Boolean term>" }` is a
   condition on the class `k` over scalar and table parameters only (no column).
@@ -827,6 +848,16 @@ Every right side of a summand's next-state assignments, and every action argumen
 is evaluated in the state before the summand fires, as in the LPS. The generated
 code writes in place only where that gives the same result; otherwise it evaluates
 into temporaries first. A function update `f[i -> v]` is a write of one array slot.
+A set or list whose new value is built from its old one (`S - {x}`, `S + T`, a walk
+that takes `S` as its accumulator, under `if`) is not copied: once every other right
+side of the summand that reads it has been evaluated, the old value is moved into the
+expression that builds the new one, along a path of `if` branches and consumed
+operands on which nothing reads it after the move (a right operand that reads it is
+evaluated first). A walk or map moves its own set and list arguments the same way.
+The set operations `+`, `-` and `*` of two owned sets update the larger one in place,
+so their cost is that of the smaller. A set whose old value is needed after the step
+(a parameter an index reads, whose dirty ids are its difference with the new value)
+is still copied; §3.13.1 counts that copy.
 
 #### 3.8.5 Errors during a step
 
@@ -1020,7 +1051,8 @@ checks join them.
    (`State(config, out, audit=True)`), used by the tests of §3.16 and never by a run. After every
    summand it recomputes each index from its definition (a scan of the ids below
    `bound`, and for `newest` and `oldest` the order kept beside it as a list, as
-   §3.7.4 item 3 keeps it) and compares it with the implementation, membership,
+   §3.7.4 item 3 keeps it, and for `within`
+   that list of the index it is within, filtered by its predicate) and compares it with the implementation, membership,
    order and class; and it checks that no id at or above `bound` is a member. A
    difference fails the test with the index, the event and the id. The Rust and
    TypeScript backends are compared with it after every event (§3.16.1), so they are
@@ -1084,6 +1116,14 @@ parameters of §3.2.5.
 | hash map | `K -> X`, other `K` | read, update `O(1)`; never iterated; writing the default removes the key | `HashMap` with a fixed hasher (no random seed) | `dict` |
 | bitset | `FSet(I)`, `repr = "bitset"` | `in`, insert `+ {x}`, remove `- {x}`, `#`, `== {}`: `O(1)` | `Vec<u64>` and a count | `bytearray`, one byte per id, and a count |
 | ordered bitset | `FSet(I)` read by `least` (§3.7.6), `repr = "ordbitset"` | `in`, `#`, `== {}`: `O(1)`; insert, remove: `O(log F)`; `least`: `O(log F)` | the bitset and a `BTreeSet<u32>` of the members | the `bytearray` and a `heapq` of the members with lazy deletion (an id popped is discarded unless its byte is set), compacted when stale entries outnumber members |
+Until the whole rule is implemented, the generator applies one part of it to the
+Rust it emits: code of a summand (its acceptor and stepper functions) that copies
+a whole frontier set or list (a parameter of a set or list sort, not a column) or
+scans one (iterates it, or its difference with another) is G8, unless `cost_known`
+in the declaration (§3.6), a list of `"<summand>: <copy | scan> <parameter>"`,
+names it; an entry that no longer happens is G8 too, so the list only shrinks. The
+manifest lists each summand's entries under `cost`.
+
 | index | `[index.<name>]` of the policy (§3.7.6) | refresh at one id, `first`, `some`: `O(log F)` amortised, times the number of classes for `first` and `some` of a classed index; `F` the number of members | per index, a membership bitset (one bit per id); per class, a `BTreeSet` of `(order key, id)`, the order key being the id (`least`), the key's value (`key`) or the stamp, reversed for `newest`; for `newest` and `oldest`, a column of `u64` stamps and a run-level counter. Entries are deleted lazily: an entry is valid while its id is a member, of that class, with that key or stamp; invalid ones are dropped when they reach the front, and the set is rebuilt from its valid entries when invalid ones outnumber them | the same with `heapq` per class and `array('Q')` stamps |
 | hash set | `FSet(X)`, default | `in`, insert, remove, `#`, `== {}`: `O(1)`; `+ - * <=` of two sets: `O(k)`, only on per-id sets | `HashSet` with a fixed hasher | `set` |
 | bag | `FBag(X)` | `count`, add one, remove one: `O(1)` | `HashMap<X, u32>` | `dict` |
@@ -1373,7 +1413,7 @@ succeeded, so on any error `<generated>` is left as it was.
 | G10 | a construction assertion failed (§3.9.1): a defect of the generator |
 | G11 | the per-id layout exceeds the project's limit (§3.13.4) |
 | G12 | a sort outside §3.3, or an action argument of a sort outside §3.5.7 |
-| G13 | a `newest` or `oldest` index reads a parameter that some summand writes other than at ids visible in its assignments (§3.7.4 item 3) |
+| G13 | a `newest` or `oldest` index (not a `within` one) reads a parameter that some summand writes other than at ids visible in its assignments (§3.7.4 item 3) |
 
 Not implemented yet: G8 other than the one on two in-place updates (§3.4.8), and G11.
 

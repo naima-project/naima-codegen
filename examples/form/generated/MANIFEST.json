@@ -6,9 +6,9 @@
     "model/systems/small-model.mcrl2": "48b1cb633b3634b1429cb26d0fe6e9641adcf54426663dee6fad88dcc47bb3bb",
     "model/systems/small-probe.mcrl2": "d13c170751d93e44b493b872667e984a0b745de1a9ad38b06c4599d16da0e8df",
     "model/systems/small-refined.mcrl2": "d37f56c8aebef3eeb946bded7d29746ce2663021a0674ffa9bb372cc45e9eefe",
-    "python/form/__init__.py": "812d05e6f8004be09a89b3b64804746205044c7889155553055bf51f742b7509",
+    "python/form/__init__.py": "f2423f235cb0808cd72e48ad2a4f66d108c0674efb8cdaf5ea65cf822fec9d66",
     "rust/form/Cargo.toml": "397e1ad6441747e9365e290cc6b4dcfeed21055a063fd1029c5506b0fe78ef7a",
-    "rust/form/src/lib.rs": "3413073cfffb480d88a59ede33d4abfdd28c5d25ea5a1650790f14dc0d5452cc",
+    "rust/form/src/lib.rs": "6e11fa2c64b1300549cbad58202006d45ab45ba89fb50791939a4aac6796e93c",
     "typescript/form/form.svelte.ts": "4aa17a280df391403059a1cbc8bb8d4ec5435af8ba7ffbe6b1b2251818d793b8",
     "typescript/form/form.ts": "4d0b87dfc23be1b6f528802ab5e7dd87b21cdd658e1fcb1b02a8fd27e5a91ac0"
   },
@@ -19,7 +19,7 @@
     "naima_codegen/aterm.py": "c412a1cdb5cf139db51e89bcea35f756ac2103b68b25c683254448b358d4018f",
     "naima_codegen/checks.py": "9e912229d0517842805331b8fe4c56fbc0d0633c21ccbb413db986ab93543508",
     "naima_codegen/cli.py": "f5ebe5482a172812011f6cd60ab9688d5ec14bc174c9532090767ac8ee6d0542",
-    "naima_codegen/config.py": "39f3029f67cb83e72f15c95f1a4b691e99122c7787558315c4f6f45e83b9efe6",
+    "naima_codegen/config.py": "10f67d3c761fce916a3ddcda6ad669e5089f2960b11f9ce13e322c40d8863d63",
     "naima_codegen/errors.py": "d567bb7bde05acb085aa0867ffbb56b7f2ccddc7aab2eb82357099724b9c4eca",
     "naima_codegen/evaluate.py": "6bff0cf0c273062497f75bc78aea9ffe1abe0f84a3754549bb49b31e9446b0e0",
     "naima_codegen/expr.py": "e7a2324e0470cd5a12569c5fc601341cda3ae09c3a8cc7420122461949985e8a",
@@ -28,15 +28,15 @@
     "naima_codegen/header.py": "c545202fc26a6a400591064480be77b3df5855ee88ab36b450bd9e053bfd4493",
     "naima_codegen/lower.py": "55ad2b5d744a4e4a04c65bc103f39d2a26514e9553c9a1e0be7d2274a1d3cb95",
     "naima_codegen/lps.py": "4136574b761d57db2bf5d7a57911142651410d60843068abb5c66f07b11b5746",
-    "naima_codegen/outputs.py": "d99a4a5ab11aac7829bbf5c8f5e5a07f281d8a861d27ebb18d027b791793575d",
-    "naima_codegen/policy.py": "b8b0138c3710723263ad85f0837c30c939cc5993707977e0590ff6a37bff4314",
+    "naima_codegen/outputs.py": "64c2875fb5586668a5767f602e28bff561e010212518eaf2e6193e89d71f0622",
+    "naima_codegen/policy.py": "2720e662ca11fcc22ab4d457c7b48163b5e46c9ae3cac48c98fab423421aa528",
     "naima_codegen/project.py": "337a0f52400055c90b560625a603b0178604ef64749c6e288f2a0016372f0a40",
-    "naima_codegen/pyback.py": "a1cc318e40a4216891e8d838d1a02194de83a41cccdaa575d5d670dcea74bfdf",
-    "naima_codegen/refine.py": "2f7998ed917edacb83343189db73dda9bc6bfd6f4871996f8cb4e9c428de5268",
+    "naima_codegen/pyback.py": "c1ba70443e030fe896ca2caa309939625bfd25bd5a73a88cbb96b08518bd06af",
+    "naima_codegen/refine.py": "3114c3261d6b83c3f3ae316df71ed69b098a3d3236a8cc1fd2837bf062ae12fe",
     "naima_codegen/render.py": "8a5f47bd336590430275ece48c3c09e3a5f79c88e4bac24d5ca44e910bf1efff",
-    "naima_codegen/rustback.py": "5859a727bab8e596e598ffde6e6bc1535aea4a74add887341149e18601e38810",
+    "naima_codegen/rustback.py": "483157147be91499225493993863a8c687234df9f7e302e787621e1fce5aa096",
     "naima_codegen/source.py": "df13d79547280ceda93475354652579263db29153abe01c54441b6bc4f8501d2",
-    "naima_codegen/stepper.py": "3281c89ba978ee2c8bd16b82315f98f9be806d208299bd339394498bc10e4f48",
+    "naima_codegen/stepper.py": "f404106182e721cf5df870884aae4be5ad4428c8841d2c23772ef6f799fb10ee",
     "naima_codegen/systems.py": "641e10ccb7090dd126af819923466d95285d83182f5fe971f0b67d352b64b080",
     "naima_codegen/toolchain.py": "a2891d2a9eb57f476ecb80b8dd5384653e35898d2f1d078155f8c1f5fd0d8b15",
     "naima_codegen/tsback.py": "c3fd01d4703db9a80a796776901a3a2d3cfccf0e07c6f4b6d5f1c6dd41824bd6"
@@ -58,31 +58,31 @@
   },
   "summands": [
     {
-      "cost": null,
+      "cost": [],
       "kind": "input",
       "name": "c_edit",
       "policy": null
     },
     {
-      "cost": null,
+      "cost": [],
       "kind": "input",
       "name": "c_submit",
       "policy": null
     },
     {
-      "cost": null,
+      "cost": [],
       "kind": "input",
       "name": "c_succeeded",
       "policy": null
     },
     {
-      "cost": null,
+      "cost": [],
       "kind": "input",
       "name": "c_failed",
       "policy": null
     },
     {
-      "cost": null,
+      "cost": [],
       "kind": "output",
       "name": "c_send",
       "policy": 0

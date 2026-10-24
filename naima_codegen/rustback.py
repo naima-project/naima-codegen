@@ -27,7 +27,7 @@ from .frontend import INIT_PREFIX
 from .functions import is_fun, mentions
 from .lower import Types, g10, plan_summand, width_range
 
-from .header import block as _header_block
+from .header import block as _header_block  # noqa: E402
 HEADER = _header_block("//")
 
 _KEYWORDS = {"as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl",
@@ -93,7 +93,7 @@ impl Ix {
         }
         let ok = match (self.order, old) {
             (0, _) => i128::from(v),
-            (1, _) => k,
+            (1 | 4, _) => k,
             (_, Some((_, o))) => o,
             (o, None) => {
                 self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
@@ -110,6 +110,11 @@ impl Ix {
             self.sets.get_mut(c).ok_or(StepError::Undefined("index class"))?.insert((ok, v));
         }
         Ok(())
+    }
+
+    /// The order key of a member (an index within this one takes it, §3.7.6).
+    pub fn key_of(&self, v: u32) -> Result<i128, StepError> {
+        self.ent.get(&v).map(|e| e.1).ok_or(StepError::Undefined("index within: not a member of the outer index"))
     }
 
     /// The first (order key, id) of one class.
@@ -535,8 +540,8 @@ def type_name(sort_name: str) -> str:
 
 
 def _borrowed(code: str) -> str:
-    """A parameter read without its clone, where a reference serves."""
-    m = re.fullmatch(r"(s\.[A-Za-z_][A-Za-z0-9_]*)\.clone\(\)", code)
+    """A parameter or variable read without its clone, where a reference serves."""
+    m = re.fullmatch(r"((?:s\.)?[A-Za-z_][A-Za-z0-9_]*)\.clone\(\)", code)
     return m.group(1) if m else code
 
 
@@ -557,8 +562,10 @@ class Emitter:
         self.n = 0
         # occurrences of a variable whose value is moved, not cloned: {id(Var): code} (see takes)
         self.moves = {}
-        # set differences whose right operand is evaluated before the left one is moved: {id(App)}
-        self.hoists = set()
+        # set and list arguments passed by reference: {map: positions} (see borrowable)
+        self.borrows = {}
+        # applications whose operands after the moved one are evaluated first: {id(App): moved position}
+        self.hoists = {}
 
     def fresh(self, base: str) -> str:
         self.n += 1
@@ -821,7 +828,10 @@ class Emitter:
                 out.append("rt::dq_head(&s.%s)?" % ident(x.args[0].name))
                 continue
             if hn in self.fun_maps or hn in self.walks or hn in self.model_maps():
-                out.append(self.call(x, scope) + "?")
+                if id(x) in self.hoists:
+                    out.append("{ %s }" % (self.call(x, scope) + "?"))
+                else:
+                    out.append(self.call(x, scope) + "?")
                 continue
             if hn in self.types.proj and self.types.proj[hn][0][0].shape == "union":
                 out.append("proj_%s(&%s)?" % (ident(hn), self.expr(x.args[0], scope)))
@@ -835,8 +845,8 @@ class Emitter:
             args = out[len(out) - n:]
             del out[len(out) - n:]
             if id(x) in self.hoists:
-                h = self.fresh("h")
-                out.append("{ let %s = %s; %s }" % (h, args[1], self._app(x, hn, [args[0], h])))
+                lets, args = self.hoisted(x, args, self.owned(x)[0])
+                out.append("{ %s%s }" % (lets, self._app(x, hn, args)))
                 continue
             out.append(self._app(x, hn, args))
         return out[-1]
@@ -890,7 +900,7 @@ class Emitter:
         if x.kind in ("Exists", "Forall") and len(x.vars) == 1:
             v = x.vars[0].name
             mem, rest = x.body.args[0], x.body.args[1]
-            col = self.expr(mem.args[1], scope)
+            col = "(%s).iter().cloned()" % _borrowed(self.expr(mem.args[1], scope))
             name = self.fresh("q_")
             inner = dict(scope)
             inner[v] = (name, "val")
@@ -932,9 +942,9 @@ class Emitter:
         if hn in ("<", "<=", ">", ">=") and len(a) == 2:
             if k0 == "FSet":
                 if hn == "<=":
-                    return "(%s).is_subset(&%s)" % (a[0], a[1])
+                    return "(%s).is_subset(&%s)" % (_borrowed(a[0]), _borrowed(a[1]))
                 if hn == ">=":
-                    return "(%s).is_superset(&%s)" % (a[0], a[1])
+                    return "(%s).is_superset(&%s)" % (_borrowed(a[0]), _borrowed(a[1]))
                 raise g10("operator %s" % hn, "strict set inclusion")
             return "(%s %s %s)" % (a[0], hn, a[1])
         if hn == "=>":
@@ -982,7 +992,7 @@ class Emitter:
         if hn in ("head", "tail", "rhead", "rtail"):
             return "rt::%s(%s)?" % (hn, a[0])
         if hn == "#":
-            return "rt::count((%s).len())?" % a[0]
+            return "rt::count((%s).len())?" % _borrowed(a[0])
         if hn == ".":
             return "rt::at(%s, %s)?" % (a[0], a[1])
         if hn == "in":
@@ -1005,16 +1015,114 @@ class Emitter:
             return [0, 1], ({0} if hn == "-" else {0, 1})
         if hn in ("@fset_cons", "@fset_insert") and n == 2:
             return [1, 0], {1}
+        if hn == "|>" and n == 2:
+            return [0, 1], {1}
+        if hn in ("<|", "++") and n == 2:
+            return [0, 1], ({0} if hn == "<|" else {0, 1})
+        if hn in ("tail", "rtail") and n == 1:
+            return [0], {0}
         if hn in self.fun_maps or hn in self.walks or hn in self.model_maps():
-            return list(range(n)), {j for j in range(n) if j < len(dom) and not is_fun(self.lps, dom[j])}
+            return list(range(n)), {j for j in range(n) if j < len(dom) and not is_fun(self.lps, dom[j])
+                                    and j not in self.borrows.get(hn, ())}
         return None
 
-    def takes(self, e, name: str, code: str) -> dict:
+    def borrowable(self, maps: dict) -> dict:
+        """{map: positions}: the set and list arguments a user map only reads, passed by
+        reference instead of by value (docs/spec.md §3.8.4). A position qualifies
+        when every occurrence of its variable is read in place (`in`, `#`, `== {}`,
+        `least`, `head`, `<=`, a quantifier's range), passed at a qualifying position
+        of a map (the greatest fixpoint), or, in a walk, passed on unchanged; the list
+        a walk walks always qualifies. maps: name -> (Map, equations)."""
+        cand = {}
+        for name, (m, eqs) in maps.items():
+            dom = m.sort[1] if m.sort[0] == "->" else ()
+            w = self.walks.get(name)
+            js = set()
+            for j, srt in enumerate(dom):
+                if self.types.kind(srt) not in ("FSet", "List"):
+                    continue
+                if w is None and j == 0 and len(eqs) > 1:
+                    continue  # matched by constructor
+                js.add(j)
+            cand[name] = js
+        changed = True
+        while changed:
+            changed = False
+            for name, (m, eqs) in maps.items():
+                w = self.walks.get(name)
+                for j in sorted(cand[name]):
+                    if w is not None:
+                        if j == w.pos:
+                            continue
+                        uses = [(w.params[j], w.base), (w.params[j], w.body)]
+                    else:
+                        uses = [(e.lhs.args[j].name, e.rhs) for e in eqs
+                                if isinstance(e.lhs, App) and j < len(e.lhs.args) and isinstance(e.lhs.args[j], Var)]
+                    if not all(self._reads_only(e, v, name, j, cand) for v, e in uses):
+                        cand[name].discard(j)
+                        changed = True
+        return {k: v for k, v in cand.items() if v}
+
+    def _reads_only(self, e, v: str, me: str, j: int, cand: dict) -> bool:
+        """Whether every occurrence of variable v in e is a read in place (see borrowable)."""
+        stack = [(e, None, None)]
+        while stack:
+            x, parent, k = stack.pop()
+            if isinstance(x, Var):
+                if x.name != v:
+                    continue
+                if parent is None:
+                    return False
+                hn = parent.head.name if isinstance(parent.head, Op) else None
+                if hn == "in" and k == 1 or hn in ("#", "head", "<=", ">=") or (hn or "").startswith("ix_least_"):
+                    continue
+                if hn in ("==", "!=") and isinstance(parent.args[1 - k], Op) \
+                        and parent.args[1 - k].name in ("{}", "[]", "@fset_empty"):
+                    continue
+                if hn == me and k == j:
+                    continue  # a walk passing it on unchanged
+                if hn in cand and k in cand[hn] and hn != me:
+                    continue
+                return False
+            if isinstance(x, App):
+                for k2, a in enumerate(x.args):
+                    stack.append((a, x, k2))
+            elif isinstance(x, Bind):
+                stack.append((x.body, None, None))
+            elif isinstance(x, Whr):
+                stack.append((x.body, None, None))
+                for _, d in x.defs:
+                    stack.append((d, None, None))
+        return True
+
+    def _reach(self, e, name: str) -> bool:
+        """Whether some occurrence of `name` in e lies on a path of `if` branches and
+        consumed operands (`owned`): a place its value could be moved from."""
+        stack = [e]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, Var):
+                if x.name == name:
+                    return True
+                continue
+            if not isinstance(x, App) or not isinstance(x.head, Op):
+                continue
+            if x.head.name == "if" and len(x.args) == 3:
+                stack += [x.args[1], x.args[2]]
+                continue
+            o = self.owned(x)
+            if o is not None:
+                stack += [x.args[j] for j in o[1] if _occurs(x.args[j], name)]
+        return False
+
+    def takes(self, e, name: str, code: str, hoist: bool = True) -> dict:
         """The occurrences of variable `name` in e whose value can be moved (`code`)
         instead of cloned, as {id(occurrence): code}: those on a path of `if` branches
         and consumed operands (`owned`) along which nothing reads `name` after the move.
         Reads elsewhere stay reads (a condition is evaluated before its branches, an
-        operand before the consumed one); at most one move happens on any path."""
+        operand before the consumed one); an operand after the consumed one that reads
+        `name` is evaluated first (hoisted, `self.hoists`) when `hoist`. At most one move
+        happens on any path."""
         marked = {}
         stack = [e]
         while stack:
@@ -1033,18 +1141,35 @@ class Emitter:
                 continue
             order, owned = o
             hits = [j for j in order if _occurs(x.args[j], name)]
-            if hits and hits[-1] in owned:
-                stack.append(x.args[hits[-1]])
-            elif hits == [0, 1] and owned == {0}:
-                # S - f(S): the operand that reads S is evaluated first (hoisted)
-                self.hoists.add(id(x))
-                stack.append(x.args[0])
+            cand = [j for j in hits if j in owned and self._reach(x.args[j], name)]
+            if not cand:
+                continue
+            f = cand[-1]
+            if hits[-1] != f:
+                if not hoist or id(x) in self.hoists:
+                    continue
+                self.hoists[id(x)] = f
+            stack.append(x.args[f])
         # a subexpression shared by two paths is moved only if every path to it moves
         total = {}
         for x in walk(e):
             if isinstance(x, Var) and id(x) in marked:
                 total[id(x)] = total.get(id(x), 0) + 1
         return {k: code for k, c in marked.items() if total[k] == c}
+
+    def hoisted(self, x, args: list, order: list) -> tuple:
+        """For an application whose consumed operand is moved (`takes`): the operands
+        evaluated after it in `order`, bound first, as (lets, args)."""
+        f = self.hoists.get(id(x))
+        if f is None:
+            return "", args
+        args = list(args)
+        lets = []
+        for j in order[order.index(f) + 1:]:
+            h = self.fresh("h")
+            lets.append("let %s = %s; " % (h, args[j]))
+            args[j] = h
+        return "".join(lets), args
 
     # -------------------------------------------------------------- views
 
@@ -1101,9 +1226,14 @@ class Emitter:
                     args.append("&mut %s" % self.view_ov(a, scope))
                 else:
                     args.append(self.view_ref(a, scope))
+            elif j in self.borrows.get(name, ()):
+                code = self.expr(a, scope)
+                b = _borrowed(code)
+                args.append("&%s" % b if b != code else "&(%s)" % code)
             else:
                 args.append(self.expr(a, scope))
-        return "m_%s(%s)" % (ident(name), ", ".join(args))
+        lets, args = self.hoisted(x, args, list(range(len(args))))
+        return "%sm_%s(%s)" % (lets, ident(name), ", ".join(args))
 
     def apply_fe(self, fe, target: str, scope: dict, lines: list, ind: str):
         """Statements that apply a function expression to `target` (an overlay whose
@@ -1165,6 +1295,8 @@ class Emitter:
         if is_fun(self.lps, s):
             k, v = self.kv(s)
             return ("&mut dyn GetSet<%s, %s>" if j in self.written(m.name) else "&dyn Get<%s, %s>") % (k, v)
+        if j in self.borrows.get(m.name, ()):
+            return "&" + self.rtype(s)
         return self.rtype(s)
 
     def ret_type(self, m) -> str:
@@ -1172,6 +1304,7 @@ class Emitter:
         return "()" if is_fun(self.lps, r) else self.rtype(r)
 
     def emit_map(self, m, eqs) -> list:
+        self._cur = m.name
         if m.name in self.walks:
             return self.emit_walk(m, self.walks[m.name])
         name = m.name
@@ -1220,10 +1353,10 @@ class Emitter:
             # a set or list argument is the callee's own: moved into the result, not cloned
             for j, p in enumerate(lhs_args):
                 if isinstance(p, Var) and scope.get(p.name) == ("a%d" % j, "val") \
-                        and self.types.kind(p.sort) in ("FSet", "List"):
+                        and self.types.kind(p.sort) in ("FSet", "List") and j not in self.borrows.get(self._cur, ()):
                     self.moves.update(self.takes(rhs, p.name, "a%d" % j))
             code = self.expr(rhs, scope)
-            self.moves, self.hoists = {}, set()
+            self.moves, self.hoists = {}, {}
             return [ind + "Ok(%s)" % code]
         target = "a%d" % ret
         lines = [ind + "let mut w: Vec<_> = Vec::new();"]
@@ -1244,6 +1377,9 @@ class Emitter:
             if is_fun(self.lps, m.sort[1][j]):
                 lines.append("    let %s = a%d;" % (v, j))
                 scope[p] = (v, "mut" if j in self.written(m.name) else "ref")
+            elif j in self.borrows.get(m.name, ()):
+                lines.append("    let %s = a%d;" % (v, j))
+                scope[p] = (v, "val")
             else:
                 lines.append("    let mut %s = a%d;" % (v, j))
                 scope[p] = (v, "val")
@@ -1329,7 +1465,8 @@ class Emitter:
         """Moves of the walk's set and list parameters (`params`) out of x (see takes)."""
         out = {}
         for j, p in enumerate(w.params):
-            if p in params and j != w.pos and self.types.kind(m.sort[1][j]) in ("FSet", "List"):
+            if p in params and j != w.pos and self.types.kind(m.sort[1][j]) in ("FSet", "List") \
+                    and j not in self.borrows.get(m.name, ()):
                 out.update(self.takes(x, p, "std::mem::take(&mut v_%s)" % ident(p)))
         return out
 
@@ -1338,7 +1475,7 @@ class Emitter:
             # the loop ends here: every parameter is moved out, not cloned
             self.moves = self._walk_moves(m, w, x, set(w.params)) if m is not None else {}
             code = self.expr(x, self._vals(scope))
-            self.moves, self.hoists = {}, set()
+            self.moves, self.hoists = {}, {}
             return [ind + "break %s;" % code]
         target = "v_" + ident(w.params[w.ret_pos])
         lines = [ind + "let mut wr: Vec<_> = Vec::new();"]
@@ -1371,13 +1508,53 @@ class Emitter:
                 t = self.fresh("t")
                 lines.append(ind + "let %s = %s;" % (t, self.expr(a, scope)))
                 temps.append(("v_" + ident(p), t))
-            self.moves, self.hoists = {}, set()
+            self.moves, self.hoists = {}, {}
         for v, wv in writes:
             lines += [ind + "for (k, v) in %s {" % wv, ind + "    %s.set(k, v);" % v, ind + "}"]
         for v, t in temps:
             lines.append(ind + "%s = %s;" % (v, t))
         lines += [ind + "i = i.saturating_add(1);", ind + "continue;"]
         return lines
+
+
+_WHOLE = (("copy", r"\bs\.(\w+)\.clone\(\)"), ("copy", r"Vec::from\(s\.(\w+)"),
+          ("scan", r"\bs\.(\w+)\.symmetric_difference"), ("scan", r"for \w+ in &?s\.(\w+)\b"),
+          ("scan", r"\bs\.(\w+)\.iter\(\)"))
+
+
+def whole_operations(text: str, frontier: set) -> dict:
+    """{summand: sorted ["<copy | scan> <parameter>"]}: each place the code of a summand
+    (its match, fire and output functions, after their `// <summand>` comment) copies or
+    scans a whole frontier set or list, a cost that grows with the size of the DAG
+    (docs/spec.md §3.13.1)."""
+    out: dict = {}
+    cur = None
+    for line in text.split("\n"):
+        m = re.match(r"// (\S+)$", line)
+        if m:
+            cur = m.group(1)
+            continue
+        if line.startswith(("fn ", "pub fn ")) and not re.match(r"(pub )?fn (match|fire|out)", line):
+            cur = None
+        if cur is None:
+            continue
+        for kind, pat in _WHOLE:
+            for x in re.findall(pat, line):
+                if x in frontier:
+                    out.setdefault(cur, set()).add("%s %s" % (kind, x))
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
+def map_borrows(model) -> dict:
+    """{map: positions} of the set and list arguments the generated user maps of model
+    take by reference (Emitter.borrowable), for a caller that writes its own calls."""
+    em = Emitter(model)
+    eqs: dict = {}
+    for e in model.lps.equations:
+        h = e.lhs.head if isinstance(e.lhs, App) else e.lhs
+        eqs.setdefault(h.name, []).append(e)
+    maps = list(model.user_maps) + [m for m in model.lps.maps if m.name.startswith(INIT_PREFIX)]
+    return em.borrowable({m.name: (m, eqs.get(m.name, [])) for m in maps})
 
 
 def emit(model, st=None, package: str = "generated", workspace: bool = False) -> dict:
@@ -1409,8 +1586,10 @@ def emit(model, st=None, package: str = "generated", workspace: bool = False) ->
         if h.name.startswith("p_"):
             eqs.setdefault(h.name, []).append(e)
     # the user's maps by name, then the generator's init maps by name (§3.6.2)
-    for m in sorted(umaps, key=lambda m: m.name) + sorted((m for m in lps.maps if m.name.startswith(INIT_PREFIX)),
-                                                         key=lambda m: m.name):
+    emitted = sorted(umaps, key=lambda m: m.name) + sorted((m for m in lps.maps if m.name.startswith(INIT_PREFIX)),
+                                                           key=lambda m: m.name)
+    em.borrows = em.borrowable({m.name: (m, eqs.get(m.name, [])) for m in emitted})
+    for m in emitted:
         out += em.emit_map(m, eqs.get(m.name, []))
         out.append("")
 
@@ -1583,7 +1762,7 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
             plan = []
             for k, (kind, r, c) in enumerate(ops):
                 rv = "r_%s_%d" % (ident(n), k)
-                lines.append("    let %s = %s;" % (rv, em.expr(r, scope)))
+                deferred.append((rv, r, None))
                 cv = None
                 if c is not None:
                     cv = "c_%s_%d" % (ident(n), k)
@@ -1602,22 +1781,31 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
                 lines.append("    let %s = VecDeque::from(%s);" % (t, em.expr(e, scope)))
                 writes.append((n, t))
         elif _movable(em, model, n) and not (watched and n in watched):
-            deferred.append((n, e))
+            deferred.append(("n_" + ident(n), e, n))
             writes.append((n, "n_" + ident(n)))
         else:
             t = "n_" + ident(n)
             lines.append("    let %s = %s;" % (t, em.expr(e, scope)))
             writes.append((n, t))
-    # A set or list built from its old value moves the old value in, after every other
-    # read of it: the step then costs what changes, not the size of the set (otherwise
-    # every step copies whole sets).
+    # A set or list given a new value here is moved, not copied, into the one expression
+    # that consumes it (its own new value, or another's: `X := X + Y, Y := {}`), once
+    # every other expression that reads it has been evaluated: the step then costs what
+    # changes, not the size of the set (docs/spec.md §3.8.4).
+    movable = {own for _, _, own in deferred if own is not None}
     while deferred:
-        k = next((k for k, (n, _) in enumerate(deferred)
-                  if not any(_occurs(e2, n) for j, (_, e2) in enumerate(deferred) if j != k)), None)
-        n, e = deferred.pop(0 if k is None else k)
-        em.moves = {} if k is None else em.takes(e, n, "std::mem::take(&mut s.%s)" % ident(n))
-        lines.append("    let n_%s = %s;" % (ident(n), em.expr(e, scope)))
-        em.moves, em.hoists = {}, set()
+        free = []
+        for k, (_, e, _) in enumerate(deferred):
+            want = [y for y in sorted(movable) if _occurs(e, y) and em._reach(e, y)]
+            ok = [y for y in want if not any(_occurs(e2, y) for j, (_, e2, _) in enumerate(deferred) if j != k)]
+            free.append((len(ok) < len(want), k, ok))
+        _, k, ys = min(free)
+        lhs, e, _ = deferred.pop(k)
+        em.moves = {}
+        for y in ys:
+            em.moves.update(em.takes(e, y, "std::mem::take(&mut s.%s)" % ident(y), hoist=len(ys) == 1))
+        movable -= set(ys)
+        lines.append("    let %s = %s;" % (lhs, em.expr(e, scope)))
+        em.moves, em.hoists = {}, {}
     for n in commits:
         r = width_range(model, n)
         v = "v" if r is None else 'rt::fit(v, %d, %d, "%s")?' % (r[0], r[1], n)
@@ -1711,7 +1899,7 @@ def _set_inplace(em, model, n, e):
 
 # ------------------------------------------------------------------ the stepper (docs/spec.md §3.8)
 
-_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3}
+_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3, "within": 4}
 
 
 def _stepper_fields(st) -> list:
@@ -1775,6 +1963,8 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                     "    Ok(s.ix_%s.front(0).is_some())" % ix.name, "}", ""]
         cls = "ixclsno_%s(&ixcls_%s(s, n)?)" % (ix.name, ix.name) if "cls" in ix.eqs else "0"
         key = "ixkey_%s(s, n)?" % ix.name if "key" in ix.eqs else "0"
+        if ix.within:
+            key = "s.ix_%s.key_of(v)?" % ix.within
         out += ["fn ixrefresh_%s(s: &mut S, v: u32) -> Result<(), StepError> {" % ix.name,
                 "    let n = %s(v);" % it,
                 "    if ixmem_%s(s, n)? {" % ix.name,

@@ -59,7 +59,7 @@ impl Ix {
         }
         let ok = match (self.order, old) {
             (0, _) => i128::from(v),
-            (1, _) => k,
+            (1 | 4, _) => k,
             (_, Some((_, o))) => o,
             (o, None) => {
                 self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
@@ -76,6 +76,11 @@ impl Ix {
             self.sets.get_mut(c).ok_or(StepError::Undefined("index class"))?.insert((ok, v));
         }
         Ok(())
+    }
+
+    /// The order key of a member (an index within this one takes it, §3.7.6).
+    pub fn key_of(&self, v: u32) -> Result<i128, StepError> {
+        self.ent.get(&v).map(|e| e.1).ok_or(StepError::Undefined("index within: not a member of the outer index"))
     }
 
     /// The first (order key, id) of one class.
@@ -573,10 +578,10 @@ fn fire0(s: &mut S, env: (Job, )) -> Result<(), StepError> {
     let mut o_st = Ov::over(&s.st);
     o_st.set(v_j.clone(), JSt::QUEUED);
     let w_st = o_st.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::QUEUED, rt::add(((&s.entered)).get(&JSt::QUEUED), 1i128)?);
     let w_entered = o_entered.writes();
+    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     for (k, v) in w_st {
         s.st.set(k, v);
     }
@@ -689,10 +694,10 @@ fn fire4(s: &mut S, env: (Job, )) -> Result<(), StepError> {
     let mut o_st = Ov::over(&s.st);
     o_st.set(v_j.clone(), JSt::QUEUED);
     let w_st = o_st.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::QUEUED, rt::add(((&s.entered)).get(&JSt::QUEUED), 1i128)?);
     let w_entered = o_entered.writes();
+    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     for (k, v) in w_st {
         s.st.set(k, v);
     }
@@ -725,7 +730,6 @@ fn fire5(s: &mut S, env: (Job, )) -> Result<(), StepError> {
     let mut o_tries = Ov::over(&s.tries);
     o_tries.set(v_j.clone(), rt::add(((&s.tries)).get(&v_j.clone()), 1i128)?);
     let w_tries = o_tries.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     let n_slots = rt::int2nat(rt::sub(s.slots.clone(), 1i128)?)?;
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::RUNNING, rt::add(((&s.entered)).get(&JSt::RUNNING), 1i128)?);
@@ -733,6 +737,7 @@ fn fire5(s: &mut S, env: (Job, )) -> Result<(), StepError> {
     let mut o_byTries = Ov::over(&s.byTries);
     o_byTries.set(rt::add(((&s.tries)).get(&v_j.clone()), 1i128)?, rt::add(((&s.byTries)).get(&rt::add(((&s.tries)).get(&v_j.clone()), 1i128)?), 1i128)?);
     let w_byTries = o_byTries.writes();
+    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     for (k, v) in w_st {
         s.st.set(k, v);
     }
@@ -1024,10 +1029,10 @@ fn fire_s0(s: &mut S, env: (Job, )) -> Result<(), StepError> {
     let mut o_st = Ov::over(&s.st);
     o_st.set(v_j.clone(), JSt::QUEUED);
     let w_st = o_st.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::QUEUED, rt::add(((&s.entered)).get(&JSt::QUEUED), 1i128)?);
     let w_entered = o_entered.writes();
+    let r_Q_0 = rt::insert(BTreeSet::new(), v_j.clone());
     for (k, v) in w_st {
         s.dirty_Job.push(k.0);
         s.st.set(k, v);
@@ -1135,10 +1140,10 @@ fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
     let mut o_st = Ov::over(&s.st);
     o_st.set(ixfirst_retryable(s)?, JSt::QUEUED);
     let w_st = o_st.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), ixfirst_retryable(s)?);
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::QUEUED, rt::add(((&s.entered)).get(&JSt::QUEUED), 1i128)?);
     let w_entered = o_entered.writes();
+    let r_Q_0 = rt::insert(BTreeSet::new(), ixfirst_retryable(s)?);
     for (k, v) in w_st {
         s.dirty_Job.push(k.0);
         s.st.set(k, v);
@@ -1168,7 +1173,6 @@ fn out2(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
     let mut o_tries = Ov::over(&s.tries);
     o_tries.set(rt::least(&s.Q)?, rt::add(((&s.tries)).get(&rt::least(&s.Q)?), 1i128)?);
     let w_tries = o_tries.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), rt::least(&s.Q)?);
     let n_slots = rt::int2nat(rt::sub(s.slots.clone(), 1i128)?)?;
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::RUNNING, rt::add(((&s.entered)).get(&JSt::RUNNING), 1i128)?);
@@ -1176,6 +1180,7 @@ fn out2(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
     let mut o_byTries = Ov::over(&s.byTries);
     o_byTries.set(rt::add(((&s.tries)).get(&rt::least(&s.Q)?), 1i128)?, rt::add(((&s.byTries)).get(&rt::add(((&s.tries)).get(&rt::least(&s.Q)?), 1i128)?), 1i128)?);
     let w_byTries = o_byTries.writes();
+    let r_Q_0 = rt::insert(BTreeSet::new(), rt::least(&s.Q)?);
     for (k, v) in w_st {
         s.dirty_Job.push(k.0);
         s.st.set(k, v);

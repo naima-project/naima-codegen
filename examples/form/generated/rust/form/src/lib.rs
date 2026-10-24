@@ -59,7 +59,7 @@ impl Ix {
         }
         let ok = match (self.order, old) {
             (0, _) => i128::from(v),
-            (1, _) => k,
+            (1 | 4, _) => k,
             (_, Some((_, o))) => o,
             (o, None) => {
                 self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
@@ -76,6 +76,11 @@ impl Ix {
             self.sets.get_mut(c).ok_or(StepError::Undefined("index class"))?.insert((ok, v));
         }
         Ok(())
+    }
+
+    /// The order key of a member (an index within this one takes it, §3.7.6).
+    pub fn key_of(&self, v: u32) -> Result<i128, StepError> {
+        self.ent.get(&v).map(|e| e.1).ok_or(StepError::Undefined("index within: not a member of the outer index"))
     }
 
     /// The first (order key, id) of one class.

@@ -59,12 +59,13 @@ class _Index:
     """An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class a heap
     of (order key, id) with lazy deletion; an entry is valid while its id is a
     member of that class with that order key. Order keys: the id (least), the
-    key's value (key), minus the entry stamp (newest), the stamp (oldest)."""
+    key's value (key), minus the entry stamp (newest), the stamp (oldest), the
+    order key of the index it is within (within)."""
 
     __slots__ = ("order", "ent", "heaps", "stamp")
 
     def __init__(self, order, ncls):
-        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest
+        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest, 4 within
         self.ent = {}  # id -> (class, order key)
         self.heaps = [[] for _ in range(ncls)]
         self.stamp = 0
@@ -78,7 +79,7 @@ class _Index:
         o = self.order
         if o == 0:
             ok = v
-        elif o == 1:
+        elif o in (1, 4):
             ok = k
         elif old is not None:
             ok = old[1]  # a member keeps its stamp, across a change of class too

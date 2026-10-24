@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from .errors import Diagnostic
 
 POLICY = "model/policy.toml"
-ORDERS = ("least", "key", "newest", "oldest")
+ORDERS = ("least", "key", "newest", "oldest", "within")
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_']*")
 _OPS = re.compile(r"\b(least|first|some)\s*\(\s*([A-Za-z_][A-Za-z0-9_']*)\s*\)")
 
@@ -34,6 +34,7 @@ class Index:
     cls: str | None = None
     adm_var: str | None = None
     adm_when: str | None = None
+    within: str | None = None  # order within: the index whose order this one takes (§3.7.6)
 
 
 @dataclass
@@ -90,11 +91,13 @@ def read_policy(text: str):
             problems.append((w, "§3.7.6", "order %s is not one of %s" % (ix["order"], ", ".join(ORDERS))))
         if (ix["order"] == "key") != ("key" in ix):
             problems.append((w, "§3.7.6", "a key is given exactly when the order is key"))
+        if (ix["order"] == "within") != ("within" in ix):
+            problems.append((w, "§3.7.6", "within is given exactly when the order is within"))
         if ("class" in ix) != ("admits" in ix):
             problems.append((w, "§3.7.6", "class and admits come together"))
         adm = ix.get("admits") or {}
         p.index[name] = Index(name, ix["sort"], ix["var"], ix["bound"], ix["member"], ix["order"], ix.get("key"),
-                              ix.get("class"), adm.get("var"), adm.get("when"))
+                              ix.get("class"), adm.get("var"), adm.get("when"), ix.get("within"))
     p.maps = d.get("maps", "")
     p.defer = dict(d.get("defer", {}))
     return p, problems

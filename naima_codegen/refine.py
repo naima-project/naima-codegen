@@ -28,9 +28,9 @@ import re
 from dataclasses import dataclass, field
 
 from .errors import Diagnostic, GeneratorError
+from .header import block as _header_block
 from .policy import POLICY, Policy, idents, operations
 from .source import split_top, strip_comments
-from .header import block as _header_block
 
 CORE = "model/core.mcrl2"
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_']*")
@@ -293,6 +293,7 @@ class IndexInfo:
     cls_sort: str | None
     key_sort: str | None
     list_param: str | None  # ix_<name> for newest and oldest
+    within: str | None = None  # order within: the newest/oldest index whose list it walks (§3.7.4 item 4)
 
 
 def refine(core_text: str, policy: Policy, kinds: dict | None = None) -> Refined:
@@ -327,6 +328,8 @@ def refine(core_text: str, policy: Policy, kinds: dict | None = None) -> Refined
                 return "ix_least_%s(%s, 0)" % (el, a)
             ix = indexes[a]
             q = _all_args(ix)
+            if ix.within:
+                return "ix_%s_%s(%s)" % (op, a, ", ".join([indexes[ix.within].list_param] + q))
             if ix.list_param:
                 return "ix_%s_%s(%s)" % (op, a, ", ".join([ix.list_param] + q))
             if op == "some":
@@ -523,7 +526,21 @@ def _index_infos(policy: Policy, ct: CoreText, params: dict, g) -> dict:
         out[name] = IndexInfo(
             name, ix.sort, ct.ids[ix.sort], ix.order, args_of(ix.member), args_of(ix.cls), args_of(ix.key),
             args_of(ix.adm_when), args_of(ix.bound), codomain(ix.cls, ix.var, "class", name),
-            codomain(ix.key, ix.var, "key", name), "ix_%s" % name if ix.order in ("newest", "oldest") else None)
+            codomain(ix.key, ix.var, "key", name), "ix_%s" % name if ix.order in ("newest", "oldest") else None,
+            ix.within)
+        if ix.within is not None:
+            j = policy.index.get(ix.within)
+            why = None
+            if j is None or ix.within not in out:
+                why = "%s is not an index declared before it" % ix.within
+            elif j.order not in ("newest", "oldest"):
+                why = "%s has order %s, not newest or oldest" % (ix.within, j.order)
+            elif j.sort != ix.sort or norm(j.bound) != norm(ix.bound):
+                why = "%s has another sort or bound" % ix.within
+            elif norm(j.member) not in [norm(c) for c in conjuncts(ix.member)]:
+                why = "the membership of %s is not a conjunct of this index's" % ix.within
+            if why:
+                g("G9", "index.%s" % name, "§3.7.6", "order within: " + why)
     return out
 
 
@@ -538,6 +555,8 @@ def _union(*lists) -> list:
 
 
 def _all_args(ix: IndexInfo) -> list:
+    if ix.within:
+        return _ok_args(ix)
     if ix.list_param:
         return _union(ix.cls_args, ix.adm_args)
     return _union(ix.mem_args, ix.cls_args, ix.key_args, ix.adm_args, ix.bound_args)
@@ -617,6 +636,19 @@ def _definitions(policy: Policy, indexes: dict, least_sorts: list, ct: CoreText)
             okv = "%s && %s" % (okv, call("ix_adm_%s" % name, info.adm_args, [call("ix_cls_%s" % name, info.cls_args, ["ix_v"])]))
         out.append("eqn %s = %s;" % (call("ix_ok_%s" % name, ok_args, ["ix_v"]), okv))
         q = _all_args(info)
+        if info.within:
+            # a walk over the list of the index it is within (§3.7.4 item 4)
+            L = "List(%s)" % I
+            okw = call("ix_ok_%s" % name, ok_args, ["ix_y"])
+            out.append(mapdecl("ix_first_%s" % name, [], [L] + [params[a] for a in q], I))
+            out.append(mapdecl("ix_some_%s" % name, [], [L] + [params[a] for a in q], "Bool"))
+            out.append(decl(q, ["ix_y: %s" % I, "ix_l: %s" % L]))
+            qa = ", ".join([""] + vlist(q)) if q else ""
+            out.append("eqn ix_first_%s([]%s) = %s(0);" % (name, qa, C))
+            out.append("    ix_first_%s(ix_y |> ix_l%s) = if(%s, ix_y, ix_first_%s(ix_l%s));" % (name, qa, okw, name, qa))
+            out.append("    ix_some_%s([]%s) = false;" % (name, qa))
+            out.append("    ix_some_%s(ix_y |> ix_l%s) = %s || ix_some_%s(ix_l%s);" % (name, qa, okw, name, qa))
+            continue
         if info.list_param:
             L = "List(%s)" % I
             adm = ("%s" % call("ix_adm_%s" % name, info.adm_args, [call("ix_cls_%s" % name, info.cls_args, ["ix_y"])])

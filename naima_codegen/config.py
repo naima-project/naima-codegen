@@ -17,7 +17,7 @@ REPRS = ("bitset", "adj-fixed", "adj-append", "deque")
 KINDS = ("input", "output")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*$")
 
-_TOP = {"mcrl2_version", "parameter", "action", "id_sorts", "constants", "widths", "observable", "project", "systems"}
+_TOP = {"mcrl2_version", "parameter", "action", "id_sorts", "constants", "widths", "observable", "project", "systems", "cost_known"}
 _PARAM = {"name", "role", "repr", "width", "sort", "init"}
 _ACTION = {"label", "kind", "args"}
 _OBS = {"name", "arg", "sort", "expr"}
@@ -44,6 +44,7 @@ class Config:
     observables: list = field(default_factory=list)
     project: dict = field(default_factory=dict)  # the [project] table, defaults filled in (§3.6.9)
     systems: dict = field(default_factory=dict)  # the [systems] table: groups, ids (§3.17)
+    cost_known: list = field(default_factory=list)  # "<summand>: <kind> <parameter>" sites G8 still lets through
 
 
 def read_config(text: str) -> tuple[Config, list[tuple[str, str, str]]]:
@@ -57,6 +58,12 @@ def read_config(text: str) -> tuple[Config, list[tuple[str, str, str]]]:
 
     for k in sorted(set(data) - _TOP):
         problems.append((k, "§3.6", "unknown key %r" % k))
+
+    ck = data.get("cost_known", [])
+    if not isinstance(ck, list) or not all(isinstance(x, str) for x in ck):
+        problems.append(("cost_known", "§3.13.1", "a list of strings"))
+    else:
+        cfg.cost_known = list(ck)
 
     v = data.get("mcrl2_version")
     if not isinstance(v, str) or not v:

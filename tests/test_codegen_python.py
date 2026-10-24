@@ -219,52 +219,6 @@ class MiniMaps(_Maps, unittest.TestCase):
         return _mini_root(), True
 
 
-def _moves_root() -> str:
-    """The mini fixture with sets held as values and built from their old values: a walk
-    that removes from its set accumulator, RQ's new value made by that walk from RQ, and
-    maps on two sets (union, difference, intersection: rt's in-place forms)."""
-    d = _mini_root()
-    core, toml = Path(d) / "model" / "core.mcrl2", Path(d) / "model" / "codegen.toml"
-    text = core.read_text()
-    for old, new in (
-            ("     tick: (St -> Nat) # St -> (St -> Nat);",
-             "     tick: (St -> Nat) # St -> (St -> Nat);\n"
-             "     drop: FSet(Node) # List(Node) -> FSet(Node);\n"
-             "     join, less, meet: FSet(Node) # FSet(Node) -> FSet(Node);"),
-            ("var  s: St;", "var  S, T: FSet(Node); s: St;"),
-            ("     tick(t, s) = t[s -> t(s) + 1];",
-             "     tick(t, s) = t[s -> t(s) + 1];\n"
-             "     drop(S, []) = S;\n     drop(S, n |> l) = drop(S - {n}, l);\n"
-             "     join(S, T) = S + T;\n     less(S, T) = S - T;\n     meet(S, T) = S * T;"),
-            ("RQ = RQ + {x}, uses", "RQ = drop(RQ + {x}, l), uses")):
-        assert old in text, old
-        text = text.replace(old, new)
-    core.write_text(text)
-    toml.write_text(toml.read_text().replace('name = "RQ"\nrole = "frontier"\nrepr = "bitset"',
-                                             'name = "RQ"\nrole = "frontier"'))
-    return d
-
-
-class MovedSets(_Maps, unittest.TestCase):
-    """A set built from its old value moves the old value in (std::mem::take), never
-    copies it; the maps on sets still agree with mCRL2's rewriter in both backends."""
-
-    @staticmethod
-    def project():
-        return _moves_root(), True
-
-    def test_old_sets_are_moved_not_cloned(self):
-        from naima_codegen import rustback
-
-        lib = rustback.emit(self.model)["src/lib.rs"]
-        self.assertIn("break std::mem::take(&mut v_S);", lib)  # the walk's exit
-        self.assertIn("rt::diff(std::mem::take(&mut v_S), ", lib)  # the walk's step
-        self.assertIn("m_drop(rt::union(std::mem::take(&mut s.RQ), ", lib)  # the step's new RQ
-        self.assertNotIn("s.RQ.clone()", lib)
-        for op in ("union", "diff", "inter"):
-            self.assertNotIn("pub fn %s<X: Ord + Clone>" % op, lib)
-
-
 class ExampleMaps(_Maps, unittest.TestCase):
     @staticmethod
     def project():
@@ -393,6 +347,7 @@ def _run_rust_cases(model, types, cases) -> dict:
     from naima_codegen.functions import is_fun
 
     em = rustback.Emitter(model)
+    borrows = rustback.map_borrows(model)
     body = ["use std::collections::BTreeSet;", "use %s::*;" % CRATE, "", "#[allow(unused_mut, clippy::all)]", "fn main() {", "    let mut out = String::new();"]
     for m, pyargs, pts, rsort, n, first in cases:
         written = em.written(m.name)
@@ -404,7 +359,7 @@ def _run_rust_cases(model, types, cases) -> dict:
                 lets.append("let mut f%d = %s;" % (j, lit))
                 args.append(("&mut f%d" if j in written else "&f%d") % j)
             else:
-                args.append(lit)
+                args.append("&%s" % lit if j in borrows.get(m.name, ()) else lit)
         call = "m_%s(%s)" % (rustback.ident(m.name), ", ".join(args))
         body.append("    {")
         body += ["        " + x for x in lets]

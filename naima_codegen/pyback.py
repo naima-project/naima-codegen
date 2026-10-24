@@ -26,7 +26,7 @@ from .frontend import INIT_PREFIX
 from .functions import is_fun, mentions
 from .lower import Types, codec_desc, fun_params, g10, plan_summand, width_range
 
-from .header import block as _header_block
+from .header import block as _header_block  # noqa: E402
 HEADER = _header_block("#")
 
 RUNTIME = '''
@@ -82,12 +82,13 @@ class _Index:
     """An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class a heap
     of (order key, id) with lazy deletion; an entry is valid while its id is a
     member of that class with that order key. Order keys: the id (least), the
-    key's value (key), minus the entry stamp (newest), the stamp (oldest)."""
+    key's value (key), minus the entry stamp (newest), the stamp (oldest), the
+    order key of the index it is within (within)."""
 
     __slots__ = ("order", "ent", "heaps", "stamp")
 
     def __init__(self, order, ncls):
-        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest
+        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest, 4 within
         self.ent = {}  # id -> (class, order key)
         self.heaps = [[] for _ in range(ncls)]
         self.stamp = 0
@@ -101,7 +102,7 @@ class _Index:
         o = self.order
         if o == 0:
             ok = v
-        elif o == 1:
+        elif o in (1, 4):
             ok = k
         elif old is not None:
             ok = old[1]  # a member keeps its stamp, across a change of class too
@@ -1016,7 +1017,7 @@ def _step(c, j) -> str:
 
 # ------------------------------------------------------------------ the stepper (docs/spec.md §3.8)
 
-_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3}
+_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3, "within": 4}
 
 
 def _stepper_slots(st) -> list:
@@ -1059,6 +1060,7 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                   "    if _ixmem_%s(s, v):" % ix.name,
                   "        s._ix_%s.refresh(v, True, %s, %s)" % (
                       ix.name, "_ixcls_%s(s, v)" % ix.name if "cls" in ix.eqs else "0",
+                      "s._ix_%s.ent[v][1]" % ix.within if ix.within else
                       "_ixkey_%s(s, v)" % ix.name if "key" in ix.eqs else "0"),
                   "    else:", "        s._ix_%s.refresh(v, False, 0, 0)" % ix.name]
     sorts = sorted({ix.sort for ix in st.indexes} | set(st.watched.values()))
@@ -1093,6 +1095,11 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                       "    s._aud_%s = %s" % (n, "entered + keep" if ix.order == "newest" else "keep + entered"),
                       "    if s._ix_%s.ordered() != s._aud_%s:" % (n, n),
                       "        raise AuditFailed('index %s: order %%r, by definition %%r' %% (s._ix_%s.ordered(), s._aud_%s))" % (n, n, n)]
+        elif ix.within:
+            # the order by definition: the list of the index it is within, filtered (§3.7.4 item 4)
+            lines += ["    now = set(ref)", "    want = [v for v in s._aud_%s if v in now]" % ix.within,
+                      "    if s._ix_%s.ordered() != want:" % n,
+                      "        raise AuditFailed('index %s: order %%r, by definition %%r' %% (s._ix_%s.ordered(), want))" % (n, n)]
         else:
             okey = "_ixkey_%s(s, v), v" % n if "key" in ix.eqs else "v"
             lines += ["    if s._ix_%s.ordered() != sorted(ref, key=lambda v: (%s)):" % (n, okey),

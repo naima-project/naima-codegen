@@ -70,6 +70,7 @@ def build(proj, model, toolset: str, tools=None) -> dict:
         for k, v in tsback.emit(model, st, module=pj["typescript_module"]).items():
             files["typescript/%s/%s" % (pj["typescript_module"], k)] = v
     files.update(model_files)
+    costs = _whole_operations(proj, model, files["rust/%s/src/lib.rs" % proj.cfg.project["rust_crate"]])
     extra = [proj.m("env.mcrl2"), proj.m("observers.mcrl2")] + sorted(
         proj.m("instances/" + p.name) for p in proj.path(proj.m("instances")).glob("*.mcrl2")) if st is not None else []
     inputs = {f: _sha(proj.path(f).read_bytes())
@@ -81,7 +82,7 @@ def build(proj, model, toolset: str, tools=None) -> dict:
         "summands": [{"name": s.name, "kind": model.summand_kind.get(s.name),
                       "policy": (st.refined.outputs.index(next(o for o in st.refined.outputs if o.name == s.name))
                                  if st is not None and model.summand_kind.get(s.name) == "output" else None),
-                      "cost": None}
+                      "cost": costs.get(s.name, [])}
                      for s in model.lps.summands],
         "walks": sorted(model.walks),
         "layout": None,
@@ -94,6 +95,31 @@ def build(proj, model, toolset: str, tools=None) -> dict:
     }
     files["MANIFEST.json"] = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     return files
+
+
+def _whole_operations(proj, model, rust: str) -> dict:
+    """The whole copies and scans of frontier sets and lists in the Rust step code
+    (rustback.whole_operations); one not listed in `cost_known` of the declaration is
+    G8, and so is a listed one that no longer happens (§3.13.1)."""
+    from .errors import Diagnostic, GeneratorError
+    from .functions import is_fun
+    from .lower import Types
+
+    types = Types(model.lps, model.config.id_sorts)
+    frontier = {n for n, srt in model.lps.params if not is_fun(model.lps, srt) and types.kind(srt) in ("FSet", "List")}
+    costs = rustback.whole_operations(rust, frontier)
+    found = {"%s: %s" % (k, x) for k, v in costs.items() for x in v}
+    known = set(model.config.cost_known)
+    lib = "%s/rust/%s/src/lib.rs" % (proj.generated, proj.cfg.project["rust_crate"])
+    probs = [Diagnostic("G8", lib, x, "§3.13.1",
+                        "a whole frontier set or list copied or scanned at every firing; "
+                        "change the model or the generator, or list it in cost_known of %s" % proj.toml)
+             for x in sorted(found - known)]
+    probs += [Diagnostic("G8", proj.toml, x, "§3.13.1", "listed in cost_known but no longer happens: remove it")
+              for x in sorted(known - found)]
+    if probs:
+        raise GeneratorError(probs)
+    return costs
 
 
 def _refinement(proj, model, tools):
