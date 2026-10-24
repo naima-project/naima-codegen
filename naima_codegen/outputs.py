@@ -24,7 +24,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import layout, pyback, rustback
+from . import layout, pyback, rustback, tsback
 from .frontend import TOML
 
 
