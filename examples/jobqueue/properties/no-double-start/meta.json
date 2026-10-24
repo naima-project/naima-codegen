@@ -1,0 +1,6 @@
+{
+  "title": "A job is never started twice at once",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/no-double-start.mcf"
+}

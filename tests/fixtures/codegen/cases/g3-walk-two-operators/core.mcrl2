@@ -1,0 +1,44 @@
+% A small Core inside the accepted subset (code-generator-v4 §3.3-§3.6): the front
+% end's positive fixture, and the base the negative cases of cases/ change.
+sort Node = struct node(ix: Nat);
+     St = struct IDLE | BUSY | DONE;
+     Job = struct job(jn: Node, jp: Nat);
+     Why = struct wnone | wfail(wn: Node);
+map  lim: Nat;
+     next: St -> St;
+     cap: Nat # Nat -> Nat;
+     isFail: Why -> Bool;
+     bump: (Node -> Nat) # List(Node) -> (Node -> Nat);    % a walk returning its accumulator (§3.4.8)
+     anyBusy: List(Node) # (Node -> St) -> Bool;           % a walk accumulating with ||
+     tick: (St -> Nat) # St -> (St -> Nat);                % a function-sorted result, not a walk
+var  s: St; a, b: Nat; n: Node; l: List(Node); f: Node -> Nat; g: Node -> St; t: St -> Nat;
+eqn  lim = 3;
+     next(IDLE) = BUSY;
+     next(BUSY) = DONE;
+     next(DONE) = DONE;
+     cap(a, b) = if(a > b, b, a);
+     isFail(wnone) = false;
+     isFail(wfail(n)) = true;
+     bump(f, []) = f;
+     bump(f, n |> l) = bump(f[n -> f(n) + 1], l);
+     anyBusy([], g) = false;
+     anyBusy(n |> l, g) = g(n) == BUSY || (g(n) == IDLE && anyBusy(l, g));
+     tick(t, s) = t[s -> t(s) + 1];
+act  c_submit: Node # List(Node);
+     c_done: Node;
+     c_fire: Node # Nat;
+     c_finish: Nat;
+     c_start: Job;
+     c_halt: Why;
+proc Core(w: Nat, n: Nat, st: Node -> St, deps: Node -> List(Node), RQ: FSet(Node), run: Nat, why: Why,
+          uses: Node -> Nat, tally: St -> Nat, slots: Nat) =
+       sum x: Node, l: List(Node) . (ix(x) == n && st(x) == IDLE && !anyBusy(l, st)) -> c_submit(x, l) . Core(n = n + 1, deps = deps[x -> l], RQ = RQ + {x}, uses = bump(uses, l))
+     + sum x: Node, d: List(Node) . (d == deps(x) && x in RQ && run < cap(w, lim) && (forall y: Node . y in deps(x) => st(y) == DONE)) -> c_fire(x, #d) . Core(RQ = RQ - {x}, st = st[x -> next(st(x))], run = run + 1)
+     + sum x: Node . (x in RQ && run == 0 && deps(x) == []) -> c_fire(x, 0) . Core(RQ = RQ - {x}, st = st[x -> next(st(x))], run = 1)
+     + sum x: Node . (st(x) == BUSY && run > 0) -> c_done(x) . Core(st = st[x -> next(st(x))], run = Int2Nat(run - 1))
+     + (n > 0 && run == 0 && RQ == {} && !isFail(why)) -> c_finish(n) . Core(n = 0)
+     + (n > 0 && run == 0 && RQ == {} && isFail(why)) -> c_finish(0) . Core(n = 0)
+     + (n == 0 && run > lim) -> c_finish(1) . Core(why = wnone)
+     + sum x: Node . (x in RQ && slots > 0) -> c_start(job(x, uses(x))) . Core(slots = Int2Nat(slots - 1), tally = tick(tally, BUSY))
+     + sum y: Why . (run == 0) -> c_halt(y) . Core(why = y)
+     + delta;

@@ -1,0 +1,63 @@
+# The interface declaration of the form (docs/spec.md §3.6) and its project table (§3.6.9):
+# a model made for a user interface, generated for the three backends.
+mcrl2_version = "202607.0"
+id_sorts = []
+
+[project]
+backends = ["typescript", "python", "rust"]
+typescript_module = "form"
+python_package = "form"
+rust_crate = "form"
+properties = "properties"
+
+[widths]
+Nat = "u32"
+
+[[parameter]]
+name = "limit"
+role = "config"
+
+[[parameter]]
+name = "phase"
+role = "scalar"
+
+[[parameter]]
+name = "valid"
+role = "scalar"
+
+[[parameter]]
+name = "tries"
+role = "scalar"
+
+[[parameter]]
+name = "queued"
+role = "scalar"
+
+[[action]]
+label = "c_edit"
+kind = "input"
+args = ["valid"]
+
+[[action]]
+label = "c_submit"
+kind = "input"
+args = []
+
+[[action]]
+label = "c_succeeded"
+kind = "input"
+args = []
+
+[[action]]
+label = "c_failed"
+kind = "input"
+args = []
+
+[[action]]
+label = "c_send"
+kind = "output"
+args = ["attempt"]
+
+# The systems the refinement is checked on (§3.17): both instances in one group.
+[systems.groups]
+small = ["once", "never"]

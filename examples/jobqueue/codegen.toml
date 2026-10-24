@@ -1,0 +1,100 @@
+# The interface declaration of the job queue (docs/spec.md §3.6) and its project table (§3.6.9).
+mcrl2_version = "202607.0"
+id_sorts = ["Job"]
+
+[project]
+backends = ["rust", "python", "typescript"]
+rust_crate = "jobqueue"
+python_package = "jobqueue"
+typescript_module = "jobqueue"
+properties = "properties"
+
+[constants]
+retries = "Nat"
+
+[widths]
+Nat = "u32"
+
+[[parameter]]
+name = "w"
+role = "config"
+
+[[parameter]]
+name = "nj"
+role = "scalar"
+
+[[parameter]]
+name = "st"
+role = "column"
+
+[[parameter]]
+name = "tries"
+role = "column"
+width = "u8"
+
+[[parameter]]
+name = "Q"
+role = "frontier"
+repr = "bitset"
+
+[[parameter]]
+name = "slots"
+role = "scalar"
+init = "w"
+
+[[parameter]]
+name = "entered"
+role = "table"
+
+[[parameter]]
+name = "byTries"
+role = "map"
+
+[[action]]
+label = "c_submit"
+kind = "input"
+args = ["job"]
+
+[[action]]
+label = "c_finished"
+kind = "input"
+args = ["job"]
+
+[[action]]
+label = "c_crashed"
+kind = "input"
+args = ["job"]
+
+[[action]]
+label = "c_start"
+kind = "output"
+args = ["job"]
+
+[[action]]
+label = "c_retry"
+kind = "output"
+args = ["job"]
+
+[[action]]
+label = "c_give_up"
+kind = "output"
+args = ["job"]
+
+[[observable]]
+name = "free_slots"
+expr = "slots"
+
+[[observable]]
+name = "state_of"
+arg = "j"
+sort = "Job"
+expr = "st(j)"
+
+# The systems the refinement is checked on (§3.17): one, two and three in one group,
+# flaky in a group of its own (every instance no group lists gets one).
+[systems.groups]
+small = ["one", "two", "three"]
+
+[systems.ids.Job]
+prefix = "J"
+header = "jobs"

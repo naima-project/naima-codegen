@@ -1,0 +1,4 @@
+% @jobs 1
+% flaky: one worker, one job that crashes on every try and is given up.
+var j: Job;
+eqn I_w(@I) = 1;  I_jobs(@I) = 1;  I_crash(@I, j) = 3;

@@ -1,0 +1,4 @@
+% Every send answers a submit: none before the first submit, and never two sends
+% without a submit between them.
+[(!submit)* . exists n: Nat . send(n)] false &&
+[true* . (exists n: Nat . send(n)) . (!submit)* . (exists n: Nat . send(n))] false

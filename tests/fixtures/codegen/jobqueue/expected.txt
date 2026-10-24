@@ -1,0 +1,74 @@
+# sorts
+sort JSt = struct FREE | QUEUED | RUNNING | FAILED | DONE | GAVEUP;  % enumeration
+sort Job = struct job(jx: Nat);  % record
+# maps
+map gen_init_slots: Nat -> Nat;
+map retries: Nat;
+map spent: Nat -> Bool;
+# equations
+gen_init_slots(w) = w;
+retries = 2;
+spent(t) = (t >= retries);
+# actions
+act c_crashed: Job;
+act c_finished: Job;
+act c_give_up: Job;
+act c_retry: Job;
+act c_start: Job;
+act c_submit: Job;
+# parameters
+w: Nat = 2
+nj: Nat = 0
+st: Job -> JSt = (lambda j: Job . FREE)
+tries: Job -> Nat = (lambda j: Job . 0)
+Q: FSet(Job) = {}
+slots: Nat = 2
+entered: JSt -> Nat = (lambda s: JSt . 0)
+byTries: Nat -> Nat = (lambda t: Nat . 0)
+# summands (6, delta summands 1)
+summand c_submit
+  sum j: Job
+  cond (jx(j) == nj)
+  act  c_submit(j)
+  nj := (nj + 1)
+  st := st[j -> QUEUED]
+  Q := (Q + ({j} + {}))
+  entered := entered[QUEUED -> Pos2Nat((entered(QUEUED) + 1))]
+summand c_finished
+  sum j: Job
+  cond (st(j) == RUNNING)
+  act  c_finished(j)
+  st := st[j -> DONE]
+  slots := (slots + 1)
+  entered := entered[DONE -> Pos2Nat((entered(DONE) + 1))]
+summand c_crashed
+  sum j: Job
+  cond (st(j) == RUNNING)
+  act  c_crashed(j)
+  st := st[j -> FAILED]
+  slots := (slots + 1)
+  entered := entered[FAILED -> Pos2Nat((entered(FAILED) + 1))]
+summand c_give_up
+  sum j: Job
+  cond ((st(j) == FAILED) && (2 <= tries(j)))
+  act  c_give_up(j)
+  st := st[j -> GAVEUP]
+  entered := entered[GAVEUP -> Pos2Nat((entered(GAVEUP) + 1))]
+summand c_retry
+  sum j: Job
+  cond ((st(j) == FAILED) && !(2 <= tries(j)))
+  act  c_retry(j)
+  st := st[j -> QUEUED]
+  Q := (Q + ({j} + {}))
+  entered := entered[QUEUED -> Pos2Nat((entered(QUEUED) + 1))]
+summand c_start
+  sum j: Job
+  cond ((j in Q) && (0 < slots))
+  act  c_start(j)
+  st := st[j -> RUNNING]
+  tries := tries[j -> Pos2Nat((tries(j) + 1))]
+  Q := (Q - ({j} + {}))
+  slots := Int2Nat((slots - 1))
+  entered := entered[RUNNING -> Pos2Nat((entered(RUNNING) + 1))]
+  byTries := byTries[Pos2Nat((tries(j) + 1)) -> Pos2Nat((byTries(Pos2Nat((tries(j) + 1))) + 1))]
+# accepted

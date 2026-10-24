@@ -1,0 +1,6 @@
+{
+  "title": "Every send answers a submit",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/one-send-per-submit.mcf"
+}

@@ -1,0 +1,4 @@
+% @jobs 3
+% three: two workers, three jobs: one waits in the queue, the last crashes once.
+var j: Job;
+eqn I_w(@I) = 2;  I_jobs(@I) = 3;  I_crash(@I, j) = if(j == job(2), 1, 0);

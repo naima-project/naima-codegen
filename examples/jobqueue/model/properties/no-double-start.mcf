@@ -1,0 +1,3 @@
+% A job is never started again while it is at a worker: after start(j), the next
+% start(j) comes only after finished(j) or crashed(j).
+forall j: Job . [true* . start(j) . (!finished(j) && !crashed(j))* . start(j)] false

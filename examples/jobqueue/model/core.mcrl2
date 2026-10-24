@@ -1,0 +1,48 @@
+% core.mcrl2 -- a job queue with a fixed number of workers, written as one linear
+% process (docs/spec.md §3.5): every summand is  condition -> c_<label>(args) . Core(assignments).
+%
+% Clients submit jobs, numbered in submission order. A queued job starts when a worker
+% slot is free; a running job finishes or crashes. A crashed job is queued again while
+% it has tries left, and is given up after `retries` tries. Inputs come from the
+% environment (submit, finished, crashed); outputs are the queue's decisions (start,
+% retry, give_up). Each summand follows a tag line, %@input or %@order <level>.
+
+sort Job = struct job(jx: Nat);                        % the id sort
+sort JSt = struct FREE | QUEUED | RUNNING | FAILED | DONE | GAVEUP;
+
+map  retries: Nat;                                     % tries a job gets before it is given up
+     spent: Nat -> Bool;                               % no try left after this many
+var  t: Nat;
+eqn  retries = 2;
+     spent(t) = t >= retries;
+
+act  c_submit, c_finished, c_crashed: Job;
+     c_start, c_retry, c_give_up: Job;
+
+proc Core(w: Nat, nj: Nat, st: Job -> JSt, tries: Job -> Nat, Q: FSet(Job), slots: Nat,
+          entered: JSt -> Nat, byTries: Nat -> Nat) =
+% ---- inputs: the clients and the workers
+%@input
+    sum j: Job . (jx(j) == nj) ->
+      c_submit(j) . Core(nj = nj + 1, st = st[j -> QUEUED], Q = Q + {j}, entered = entered[QUEUED -> entered(QUEUED) + 1])
+%@input
+  + sum j: Job . (st(j) == RUNNING) ->
+      c_finished(j) . Core(st = st[j -> DONE], slots = slots + 1, entered = entered[DONE -> entered(DONE) + 1])
+%@input
+  + sum j: Job . (st(j) == RUNNING) ->
+      c_crashed(j) . Core(st = st[j -> FAILED], slots = slots + 1, entered = entered[FAILED -> entered(FAILED) + 1])
+
+% ---- outputs: the queue's decisions, %@order giving the level of each
+%@order 1
+  + sum j: Job . (st(j) == FAILED && spent(tries(j))) ->
+      c_give_up(j) . Core(st = st[j -> GAVEUP], entered = entered[GAVEUP -> entered(GAVEUP) + 1])
+%@order 1
+  + sum j: Job . (st(j) == FAILED && !spent(tries(j))) ->
+      c_retry(j) . Core(st = st[j -> QUEUED], Q = Q + {j}, entered = entered[QUEUED -> entered(QUEUED) + 1])
+%@order 2
+  + sum j: Job . (j in Q && slots > 0) ->
+      c_start(j) . Core(Q = Q - {j}, st = st[j -> RUNNING], slots = Int2Nat(slots - 1), tries = tries[j -> tries(j) + 1],
+                        entered = entered[RUNNING -> entered(RUNNING) + 1], byTries = byTries[tries(j) + 1 -> byTries(tries(j) + 1) + 1])
+
+%@observers
+  + delta;

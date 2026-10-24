@@ -1,0 +1,17 @@
+% observers.mcrl2 -- observers of state invariants, for verification only. Each is a
+% summand  violation -> o_<name>(...) . Core()  that leaves the state unchanged: it is
+% enabled exactly in the reachable states where the invariant fails. QUIESCENT is
+% replaced by "no output of the refined Core is enabled". The generator inserts them
+% into Core for the refined systems; they never reach the generated code.
+% @act
+act o_slots, o_idle;
+    o_queue, o_stalled: Job;
+% @summands
+  % never more free slots than workers
+  + (slots > w) -> o_slots . Core()
+  % a job is in the queue exactly when its state is QUEUED
+  + sum j: Job . ((j in Q) != (st(j) == QUEUED)) -> o_queue(j) . Core()
+  % at the end of a step no crashed job is left undecided
+  + sum j: Job . (jx(j) < nj && QUIESCENT && st(j) == FAILED) -> o_stalled(j) . Core()
+  % at the end of a step a free worker never waits next to a queued job
+  + (QUIESCENT && Q != {} && slots > 0) -> o_idle . Core()

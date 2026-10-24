@@ -1,0 +1,4 @@
+% @jobs 2
+% two: two workers, two jobs that both finish at once.
+var j: Job;
+eqn I_w(@I) = 2;  I_jobs(@I) = 2;  I_crash(@I, j) = 0;

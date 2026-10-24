@@ -1,0 +1,2 @@
+% once: three attempts allowed; the server fails the first send.
+eqn I_limit(@I) = 3;  I_fails(@I) = 1;

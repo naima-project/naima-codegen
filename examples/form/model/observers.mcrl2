@@ -1,0 +1,14 @@
+% observers.mcrl2 -- observers of state invariants, for verification only. Each is a
+% summand  violation -> o_<name>(...) . Core()  that leaves the state unchanged: it is
+% enabled exactly in the reachable states where the invariant fails. QUIESCENT is
+% replaced by "no output of the refined Core is enabled". The generator inserts them
+% into Core for the refined systems; they never reach the generated code.
+% @act
+act o_queued, o_tries, o_unsent;
+% @summands
+  % a send is queued only while the form is sending
+  + (queued && phase != SENDING) -> o_queued . Core()
+  % never more failed attempts than the form allows
+  + (tries > limit) -> o_tries . Core()
+  % at the end of a step a submitted form has been sent
+  + (QUIESCENT && queued) -> o_unsent . Core()

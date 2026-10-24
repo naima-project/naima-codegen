@@ -1,0 +1,2 @@
+% never: two attempts allowed; the server fails every send.
+eqn I_limit(@I) = 2;  I_fails(@I) = 5;

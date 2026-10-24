@@ -1,0 +1,39 @@
+% core.mcrl2 -- a form that sends what was typed and waits for the answer, written as
+% one linear process (docs/spec.md §3.5): every summand is
+% condition -> c_<label>(args) . Core(assignments).
+%
+% The user edits the form (c_edit says whether what is typed is valid) and submits it.
+% Submitting queues a send; sending is the form's own decision (c_send, an output,
+% which the user interface carries out through its port) and carries the attempt
+% number. The answer comes back as an input: c_succeeded ends the form, c_failed
+% lets the user edit again or resubmit while attempts are left. Each summand follows
+% a tag line, %@input or %@order <level>.
+
+sort Phase = struct EDITING | SENDING | SENT | FAILED;
+
+act  c_edit: Bool;
+     c_submit, c_succeeded, c_failed;
+     c_send: Nat;
+
+proc Core(limit: Nat, phase: Phase, valid: Bool, tries: Nat, queued: Bool) =
+% ---- inputs: the user and the answers to the sends
+%@input
+    sum v: Bool . (phase == EDITING || phase == FAILED) ->
+      c_edit(v) . Core(phase = EDITING, valid = v)
+%@input
+  + ((phase == EDITING || phase == FAILED) && valid && tries < limit) ->
+      c_submit . Core(phase = SENDING, queued = true)
+%@input
+  + (phase == SENDING && !queued) ->
+      c_succeeded . Core(phase = SENT)
+%@input
+  + (phase == SENDING && !queued) ->
+      c_failed . Core(phase = FAILED, tries = tries + 1)
+
+% ---- outputs: the form's decisions
+%@order 1
+  + (queued) ->
+      c_send(tries + 1) . Core(queued = false)
+
+%@observers
+  + delta;

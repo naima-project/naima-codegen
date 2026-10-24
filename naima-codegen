@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""naima-codegen: the code generator's command line (naima_codegen/cli.py, docs/spec.md §3.6.9)."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from naima_codegen.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,3 @@
+map  cap: Nat # Nat -> Nat;
+var  c1, c2: Nat;
+eqn  cap(c1, c2) = if(c1 > c2, c2, c1);

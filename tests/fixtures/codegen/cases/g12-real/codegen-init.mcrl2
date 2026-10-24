@@ -1,0 +1,2 @@
+init Core(2, 0, lambda x: Node . IDLE, lambda x: Node . [], {}, 0, wnone,
+          lambda x: Node . 0, lambda s: St . 0, 2 * 2, 0);

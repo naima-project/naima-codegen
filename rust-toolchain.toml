@@ -1,0 +1,5 @@
+# The Rust toolchain the tests build the generated crates with.
+[toolchain]
+channel = "1.96.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

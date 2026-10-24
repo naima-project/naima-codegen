@@ -1,0 +1,4 @@
+% @jobs 2
+% one: one worker, two jobs, the first crashes once and is retried.
+var j: Job;
+eqn I_w(@I) = 1;  I_jobs(@I) = 2;  I_crash(@I, j) = if(j == job(0), 1, 0);

@@ -1,0 +1,93 @@
+mcrl2_version = "202607.0"
+id_sorts = ["Node", "St"]
+
+[constants]
+lim = "Nat"
+
+[widths]
+Nat = "u32"
+
+[[parameter]]
+name = "w"
+role = "config"
+
+[[parameter]]
+name = "n"
+role = "scalar"
+
+[[parameter]]
+name = "st"
+role = "column"
+
+[[parameter]]
+name = "deps"
+role = "column"
+repr = "adj-fixed"
+
+[[parameter]]
+name = "RQ"
+role = "frontier"
+repr = "bitset"
+
+[[parameter]]
+name = "run"
+role = "scalar"
+width = "u16"
+
+[[parameter]]
+name = "why"
+role = "scalar"
+sort = "Why"
+
+[[parameter]]
+name = "uses"
+role = "column"
+
+[[parameter]]
+name = "tally"
+role = "table"
+
+[[parameter]]
+name = "slots"
+role = "scalar"
+init = "2 * w"
+
+[[action]]
+label = "c_submit"
+kind = "input"
+args = ["node", "deps"]
+
+[[action]]
+label = "c_done"
+kind = "input"
+args = ["node"]
+
+[[action]]
+label = "c_fire"
+kind = "output"
+args = ["node", "inputs"]
+
+[[action]]
+label = "c_finish"
+kind = "output"
+args = ["count"]
+
+[[action]]
+label = "c_start"
+kind = "output"
+args = ["job"]
+
+[[action]]
+label = "c_halt"
+kind = "input"
+args = ["why"]
+
+[[observable]]
+name = "running"
+expr = "run"
+
+[[observable]]
+name = "state_of"
+arg = "x"
+sort = "Node"
+expr = "st(x)"

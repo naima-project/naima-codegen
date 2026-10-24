@@ -1,0 +1,2 @@
+# policy.toml -- the policy of the form (docs/spec.md §3.7.1): one output, nothing to choose.
+order = ["c_send"]

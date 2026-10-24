@@ -1,0 +1,30 @@
+# policy.toml -- the policy of the job queue (docs/spec.md §3.7.1).
+
+# Highest priority first: a crashed job is dealt with before a new one starts.
+order = ["c_give_up", "c_retry", "c_start"]
+
+# Crashed jobs with tries left, in the order they crashed.
+[index.retryable]
+sort = "Job"
+var = "j"
+bound = "nj"
+member = "st(j) == FAILED && tries(j) < retries"
+order = "oldest"
+
+# Crashed jobs with no try left.
+[index.spent]
+sort = "Job"
+var = "j"
+bound = "nj"
+member = "st(j) == FAILED && tries(j) >= retries"
+order = "least"
+
+# The queue is served in submission order: the least job number first.
+[select.c_start]
+j = { term = "least(Q)", when = "Q != {}" }
+
+[select.c_retry]
+j = { term = "first(retryable)", when = "some(retryable)" }
+
+[select.c_give_up]
+j = { term = "first(spent)", when = "some(spent)" }
