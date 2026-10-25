@@ -213,7 +213,7 @@ differs. Moving the pin is a commit that changes `codegen.toml` and regenerates.
 3.2.2. The LPS is produced by exactly
 
 ```sh
-mcrl22lps --lin-method=regular --no-constelm -n <input>.mcrl2 <input>.lps
+mcrl22lps --lin-method=regular --no-constelm -n -o <input>.mcrl2 <input>.lps
 lpspp --format=internal <input>.lps <input>.aterm
 ```
 
@@ -229,13 +229,22 @@ The generator reads only the `.aterm` file, a typed ATerm in which every
 variable and every operator carries its sort, so no sort is guessed. The
 pretty-printed form is never parsed.
 
-3.2.3. `--no-constelm` and `-n` are required. Without `--no-constelm`, `mcrl22lps`
+3.2.3. `--no-constelm`, `-n` and `-o` are required. Without `--no-constelm`, `mcrl22lps`
 replaces a parameter that no summand changes by its initial value. Checked on
 2026-10-06 with a Core whose worker count `W` was a parameter initialised to 2: the
 default run removed `W` and printed the condition `nrun < 2`, which would freeze a
-configuration value into the generated code. No other option is passed. Data
-rewriting stays on, so the generator reads the rewriter's normal forms, which are
-deterministic for a fixed toolset version.
+configuration value into the generated code.
+
+`-o` (`--no-rewrite`) is required too: the generator reads the terms as the model
+writes them, its own functions (`min`, `max`, a model's `monus`) called, not
+replaced by their rewritten bodies. The rewriter's normal form of `min(a, b)` is
+`if(a < b, a, b)`, which repeats each argument, so a summand whose equality-fixed
+variables feed each other (§3.5.5; the linearisation substitutes them) grew
+exponentially: on VoxLogicA's Core of 2026-10-25 one assignment of the memory
+reading's summand was 128,985 characters of Rust, its function's frame 1.9 MiB in
+a debug build, and every debug run overflowed the deciding thread's 2 MiB stack.
+Without rewriting the longest line of that crate is 8,459 characters. No other
+option is passed.
 
 3.2.4. The same two commands produce the refined LPS from
 `<generated>/model/core-refined.mcrl2` followed by `<model>/codegen-init.mcrl2`.

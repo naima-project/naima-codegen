@@ -518,7 +518,7 @@ def _fire2(s, env):
 def _match3(s, a):
     # c_give_up
     v_j = a[0]
-    if not (((s.st.get(v_j) == 3) and (2 <= s.tries.get(v_j)))):
+    if not (((s.st.get(v_j) == 3) and _m_spent(s.tries.get(v_j)))):
         return None
     return (v_j, )
 
@@ -536,7 +536,7 @@ def _fire3(s, env):
 def _match4(s, a):
     # c_retry
     v_j = a[0]
-    if not (((s.st.get(v_j) == 3) and (not (2 <= s.tries.get(v_j))))):
+    if not (((s.st.get(v_j) == 3) and (not _m_spent(s.tries.get(v_j))))):
         return None
     return (v_j, )
 
@@ -556,7 +556,7 @@ def _fire4(s, env):
 def _match5(s, a):
     # c_start
     v_j = a[0]
-    if not (((v_j in s.Q) and (0 < s.slots))):
+    if not (((v_j in s.Q) and (s.slots > 0))):
         return None
     return (v_j, )
 
@@ -777,7 +777,7 @@ def _fire_s2(s, env):
 
 def _out0(s, out):
     # c_give_up
-    if not ((_ixsome_spent(s) and ((s.st.get(_ixfirst_spent(s)) == 3) and (2 <= s.tries.get(_ixfirst_spent(s)))))):
+    if not ((_ixsome_spent(s) and ((s.st.get(_ixfirst_spent(s)) == 3) and _m_spent(s.tries.get(_ixfirst_spent(s)))))):
         return False
     out.append((0, _ixfirst_spent(s),))
     _p_st = []
@@ -791,7 +791,7 @@ def _out0(s, out):
 
 def _out1(s, out):
     # c_retry
-    if not ((_ixsome_retryable(s) and ((s.st.get(_ixfirst_retryable(s)) == 3) and (not (2 <= s.tries.get(_ixfirst_retryable(s))))))):
+    if not ((_ixsome_retryable(s) and ((s.st.get(_ixfirst_retryable(s)) == 3) and (not _m_spent(s.tries.get(_ixfirst_retryable(s))))))):
         return False
     out.append((1, _ixfirst_retryable(s),))
     _p_st = []
@@ -807,7 +807,7 @@ def _out1(s, out):
 
 def _out2(s, out):
     # c_start
-    if not (((not (s.Q == frozenset())) and ((_least(s.Q) in s.Q) and (0 < s.slots)))):
+    if not (((s.Q != frozenset()) and ((_least(s.Q) in s.Q) and (s.slots > 0)))):
         return False
     out.append((2, _least(s.Q),))
     _p_st = []

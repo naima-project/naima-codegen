@@ -55,7 +55,7 @@ summand c_submit
   uses := bump(uses, l)
 summand c_fire
   sum x: Node, d: List(Node)
-  cond ((d == deps(x)) && ((x in RQ) && ((run < if((3 < w), 3, w)) && (forall y: Node . ((y in deps(x)) => (st(y) == DONE))))))
+  cond ((d == deps(x)) && ((x in RQ) && ((run < cap(w, lim)) && (forall y: Node . ((y in deps(x)) => (st(y) == DONE))))))
   act  c_fire(x, #d)
   st := st[x -> next(st(x))]
   RQ := (RQ - ({x} + {}))
@@ -69,27 +69,27 @@ summand c_fire#2
   run := 1
 summand c_done
   sum x: Node
-  cond ((st(x) == BUSY) && (0 < run))
+  cond ((st(x) == BUSY) && (run > 0))
   act  c_done(x)
   st := st[x -> next(st(x))]
   run := Int2Nat((run - 1))
 summand c_finish
-  cond ((0 < n) && ((run == 0) && ((RQ == {}) && !isFail(why))))
+  cond ((n > 0) && ((run == 0) && ((RQ == {}) && !isFail(why))))
   act  c_finish(n)
   n := 0
 summand c_finish#2
-  cond ((0 < n) && ((run == 0) && ((RQ == {}) && isFail(why))))
+  cond ((n > 0) && ((run == 0) && ((RQ == {}) && isFail(why))))
   act  c_finish(0)
   n := 0
 summand c_finish#3
-  cond ((n == 0) && (3 < run))
+  cond ((n == 0) && (run > lim))
   act  c_finish(1)
   why := wnone
 summand c_start
   sum x: Node
-  cond ((x in RQ) && (0 < slots))
+  cond ((x in RQ) && (slots > 0))
   act  c_start(job(x, uses(x)))
-  tally := tally[BUSY -> Pos2Nat((tally(BUSY) + 1))]
+  tally := tick(tally, BUSY)
   slots := Int2Nat((slots - 1))
 summand c_halt
   sum y: Why

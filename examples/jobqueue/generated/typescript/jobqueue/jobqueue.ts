@@ -686,7 +686,7 @@ function _fire2(s: V, env: V[]): void {
 function _match3(s: V, a: V[]): V[] | null {
   // c_give_up
   const v_j = a[0];
-  if (!(((s.st.get(v_j) === "FAILED") && (2 <= s.tries.get(v_j))))) return null;
+  if (!(((s.st.get(v_j) === "FAILED") && _m_spent(s.tries.get(v_j))))) return null;
   return [v_j];
 }
 
@@ -703,7 +703,7 @@ function _fire3(s: V, env: V[]): void {
 function _match4(s: V, a: V[]): V[] | null {
   // c_retry
   const v_j = a[0];
-  if (!(((s.st.get(v_j) === "FAILED") && (!(2 <= s.tries.get(v_j)))))) return null;
+  if (!(((s.st.get(v_j) === "FAILED") && (!_m_spent(s.tries.get(v_j)))))) return null;
   return [v_j];
 }
 
@@ -722,7 +722,7 @@ function _fire4(s: V, env: V[]): void {
 function _match5(s: V, a: V[]): V[] | null {
   // c_start
   const v_j = a[0];
-  if (!((_has(s.Q, v_j) && (0 < s.slots)))) return null;
+  if (!((_has(s.Q, v_j) && (s.slots > 0)))) return null;
   return [v_j];
 }
 
@@ -917,7 +917,7 @@ function _fire_s2(s: V, env: V[]): void {
 
 function _out0(s: V, out: Action[]): boolean {
   // c_give_up
-  if (!((_ixsome_spent(s) && ((s.st.get(_ixfirst_spent(s)) === "FAILED") && (2 <= s.tries.get(_ixfirst_spent(s))))))) return false;
+  if (!((_ixsome_spent(s) && ((s.st.get(_ixfirst_spent(s)) === "FAILED") && _m_spent(s.tries.get(_ixfirst_spent(s))))))) return false;
   out.push({ type: "giveUp", job: _ixfirst_spent(s) });
   const _p_st: V[] = [];
   _p_st.push([0, _ixfirst_spent(s), "GAVEUP"]);
@@ -930,7 +930,7 @@ function _out0(s: V, out: Action[]): boolean {
 
 function _out1(s: V, out: Action[]): boolean {
   // c_retry
-  if (!((_ixsome_retryable(s) && ((s.st.get(_ixfirst_retryable(s)) === "FAILED") && (!(2 <= s.tries.get(_ixfirst_retryable(s)))))))) return false;
+  if (!((_ixsome_retryable(s) && ((s.st.get(_ixfirst_retryable(s)) === "FAILED") && (!_m_spent(s.tries.get(_ixfirst_retryable(s)))))))) return false;
   out.push({ type: "retry", job: _ixfirst_retryable(s) });
   const _p_st: V[] = [];
   _p_st.push([0, _ixfirst_retryable(s), "QUEUED"]);
@@ -945,7 +945,7 @@ function _out1(s: V, out: Action[]): boolean {
 
 function _out2(s: V, out: Action[]): boolean {
   // c_start
-  if (!(((!_eq(s.Q, [])) && (_has(s.Q, _least(s.Q)) && (0 < s.slots))))) return false;
+  if (!((!_eq(s.Q, []) && (_has(s.Q, _least(s.Q)) && (s.slots > 0))))) return false;
   out.push({ type: "start", job: _least(s.Q) });
   const _p_st: V[] = [];
   _p_st.push([0, _least(s.Q), "RUNNING"]);

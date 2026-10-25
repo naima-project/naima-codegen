@@ -1,6 +1,6 @@
 """The pinned mCRL2 toolset and the two commands that linearise (docs/spec.md §3.2).
 
-    mcrl22lps --lin-method=regular --no-constelm -n <input>.mcrl2 <input>.lps
+    mcrl22lps --lin-method=regular --no-constelm -n -o <input>.mcrl2 <input>.lps
     lpspp --format=internal <input>.lps <input>.aterm
 
 The toolset is found on PATH. When it is missing or its version is not the pin,
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .errors import Diagnostic, GeneratorError
 
-LINEARISE = ["mcrl22lps", "--lin-method=regular", "--no-constelm", "-n"]
+LINEARISE = ["mcrl22lps", "--lin-method=regular", "--no-constelm", "-n", "-o"]
 PRETTY = ["lpspp", "--format=internal"]
 _VERSION = re.compile(r"mCRL2 toolset (\S+)")
 

@@ -674,7 +674,7 @@ fn fire2(s: &mut S, env: (Job, )) -> Result<(), StepError> {
 // c_give_up
 fn match3(s: &S, a0: &Job) -> Result<Option<(Job, )>, StepError> {
     let v_j = a0.clone();
-    if !(((((&s.st)).get(&v_j.clone()) == JSt::FAILED) && (2i128 <= ((&s.tries)).get(&v_j.clone())))) {
+    if !(((((&s.st)).get(&v_j.clone()) == JSt::FAILED) && m_spent(((&s.tries)).get(&v_j.clone()))?)) {
         return Ok(None);
     }
     Ok(Some((v_j, )))
@@ -700,7 +700,7 @@ fn fire3(s: &mut S, env: (Job, )) -> Result<(), StepError> {
 // c_retry
 fn match4(s: &S, a0: &Job) -> Result<Option<(Job, )>, StepError> {
     let v_j = a0.clone();
-    if !(((((&s.st)).get(&v_j.clone()) == JSt::FAILED) && (!(2i128 <= ((&s.tries)).get(&v_j.clone()))))) {
+    if !(((((&s.st)).get(&v_j.clone()) == JSt::FAILED) && (!m_spent(((&s.tries)).get(&v_j.clone()))?))) {
         return Ok(None);
     }
     Ok(Some((v_j, )))
@@ -733,7 +733,7 @@ fn fire4(s: &mut S, env: (Job, )) -> Result<(), StepError> {
 // c_start
 fn match5(s: &S, a0: &Job) -> Result<Option<(Job, )>, StepError> {
     let v_j = a0.clone();
-    if !(((s.Q).contains(&v_j.clone()) && (0i128 < s.slots.clone()))) {
+    if !(((s.Q).contains(&v_j.clone()) && (s.slots.clone() > 0i128))) {
         return Ok(None);
     }
     Ok(Some((v_j, )))
@@ -1127,7 +1127,7 @@ fn fire_s2(s: &mut S, env: (Job, )) -> Result<(), StepError> {
 
 // c_give_up
 fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_spent(s)? && ((((&s.st)).get(&ixfirst_spent(s)?) == JSt::FAILED) && (2i128 <= ((&s.tries)).get(&ixfirst_spent(s)?))))) {
+    if !((ixsome_spent(s)? && ((((&s.st)).get(&ixfirst_spent(s)?) == JSt::FAILED) && m_spent(((&s.tries)).get(&ixfirst_spent(s)?))?))) {
         return Ok(false);
     }
     let act = Action::GiveUp(ixfirst_spent(s)?);
@@ -1150,7 +1150,7 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_retry
 fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_retryable(s)? && ((((&s.st)).get(&ixfirst_retryable(s)?) == JSt::FAILED) && (!(2i128 <= ((&s.tries)).get(&ixfirst_retryable(s)?)))))) {
+    if !((ixsome_retryable(s)? && ((((&s.st)).get(&ixfirst_retryable(s)?) == JSt::FAILED) && (!m_spent(((&s.tries)).get(&ixfirst_retryable(s)?))?)))) {
         return Ok(false);
     }
     let act = Action::Retry(ixfirst_retryable(s)?);
@@ -1180,7 +1180,7 @@ fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_start
 fn out2(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !(((!(s.Q).is_empty()) && ((s.Q).contains(&rt::least(&s.Q)?) && (0i128 < s.slots.clone())))) {
+    if !((!(s.Q).is_empty() && ((s.Q).contains(&rt::least(&s.Q)?) && (s.slots.clone() > 0i128)))) {
         return Ok(false);
     }
     let act = Action::Start(rt::least(&s.Q)?);
