@@ -200,6 +200,53 @@ def rebuild(e, fn):
     return out[0]
 
 
+def same(a, b) -> bool:
+    """a and b are the same term (structurally; the classes compare by identity)."""
+    stack = [(a, b)]
+    while stack:
+        x, y = stack.pop()
+        if type(x) is not type(y):
+            return False
+        if isinstance(x, (Var, Op)):
+            if x.name != y.name or x.sort != y.sort:
+                return False
+        elif isinstance(x, Num):
+            if x.value != y.value or x.sort != y.sort:
+                return False
+        elif isinstance(x, Bind):
+            if x.kind != y.kind or len(x.vars) != len(y.vars):
+                return False
+            stack.extend(zip(x.vars + (x.body,), y.vars + (y.body,)))
+        elif isinstance(x, (App, Whr)):
+            kx, ky = children(x), children(y)
+            if len(kx) != len(ky):
+                return False
+            stack.extend(zip(kx, ky))
+        elif x != y:
+            return False
+    return True
+
+
+def drop_reflexive(e):
+    """§3.2.3: e with every `t == t` replaced by true and `true` dropped from
+    conjunctions. Sum elimination leaves such conjuncts (a variable fixed by
+    `d == head(NQ)` becomes `head(NQ) == head(NQ)`); the rewriter used to remove
+    them, and without rewriting they would be evaluated, before the conjuncts
+    that make them defined (`NQ != []`)."""
+    def fn(x):
+        if isinstance(x, App) and isinstance(x.head, Op) and len(x.args) == 2:
+            if x.head.name == "==" and same(x.args[0], x.args[1]):
+                return Op("true", BOOL)
+            if x.head.name == "&&":
+                l, r = x.args
+                if isinstance(l, Op) and l.name == "true":
+                    return r
+                if isinstance(r, Op) and r.name == "true":
+                    return l
+        return x
+    return rebuild(e, fn)
+
+
 def free_vars(e) -> set:
     """The names of the variables free in e."""
     free: set = set()

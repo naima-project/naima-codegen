@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from . import aterm
 from .aterm import Appl
-from .expr import expr_of, sort_of
+from .expr import drop_reflexive, expr_of, sort_of
 
 _SUFFIX = re.compile(r"_Core[0-9]*$")
 UNDEFINED_TIME = "@undefined_real"
@@ -208,7 +208,7 @@ def _summand(alt, time, rename, pnames) -> Summand:
         label=label,
         sorts=sorts,
         sumvars=svs,
-        cond=expr_of(cond),
+        cond=drop_reflexive(expr_of(cond)),
         args=args,
         assigns=[(a.args[0].args[0].name, expr_of(a.args[1])) for a in assigns],
         cond_text=aterm.to_text(cond),
