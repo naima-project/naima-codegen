@@ -1334,7 +1334,7 @@ native driver instead (§3.16.5).
 
 A function-sorted parameter is a `Fun<K, V>`: its default and the entries that differ
 from it. The entries at a key of an id sort (§3.3.3) are held in a vector indexed by the
-id, those at any other key in a map ordered by key; the trait `Key` says which (an id
+id, those at any other key in a map ordered by key; the trait `FunKey` says which (an id
 type's `dense` is its index). An id's entry then costs the size of `V` (a map's entry
 costs the key, the value and the map's own nodes, several times that), and reading or
 writing it is an index, not a search: the columns of a model whose ids number in the

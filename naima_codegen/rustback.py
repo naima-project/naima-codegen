@@ -37,7 +37,7 @@ _KEYWORDS = {"as", "break", "const", "continue", "crate", "else", "enum", "exter
              "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual",
              "yield", "try", "gen"}
 # Type names the generated crate or the prelude uses.
-_TAKEN = {"Err", "Ok", "Option", "Some", "None", "Result", "Vec", "String", "Box", "Fun", "Ov", "Get", "GetSet",
+_TAKEN = {"Err", "Ok", "Option", "Some", "None", "Result", "Vec", "String", "Box", "Fun", "FunKey", "Ov", "Get", "GetSet",
           "StepError", "Reject", "Config", "State", "Event", "Action", "Entry", "Acceptor", "S", "BTreeMap",
           "BTreeSet", "M2"}
 
@@ -159,7 +159,7 @@ pub trait GetSet<K, V>: Get<K, V> {
 
 /// A function's key (docs/spec.md §3.11.5): an id is held densely, by its index, any
 /// other key sparsely.
-pub trait Key: Ord + Clone {
+pub trait FunKey: Ord + Clone {
     fn dense(&self) -> Option<usize> {
         None
     }
@@ -168,8 +168,8 @@ pub trait Key: Ord + Clone {
     }
 }
 
-impl Key for i128 {}
-impl Key for bool {}
+impl FunKey for i128 {}
+impl FunKey for bool {}
 
 /// A stored function: a default and the entries that differ from it, those at an id
 /// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
@@ -181,7 +181,7 @@ pub struct Fun<K: Ord, V> {
     v: Vec<V>,
 }
 
-impl<K: Key, V: Clone + PartialEq> Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
         Fun { d, m: BTreeMap::new(), v: Vec::new() }
     }
@@ -210,15 +210,15 @@ impl<K: Key, V: Clone + PartialEq> Fun<K, V> {
     }
 }
 
-impl<K: Key, V: Clone + PartialEq> PartialEq for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> PartialEq for Fun<K, V> {
     fn eq(&self, o: &Self) -> bool {
         self.d == o.d && self.entries() == o.entries()
     }
 }
 
-impl<K: Key, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
+impl<K: FunKey, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
 
-impl<K: Key, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     fn get(&self, k: &K) -> V {
         self.get_ref(k).clone()
     }
@@ -230,7 +230,7 @@ impl<K: Key, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     }
 }
 
-impl<K: Key, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
         match k.dense() {
             Some(i) => {
@@ -747,7 +747,7 @@ class Emitter:
             shape = t.shape[name]
             if shape == "id":
                 lines += [derive + ", Default, Copy)]", "pub struct %s(pub u32);" % tn, "",
-                          "impl Key for %s {" % tn, "    fn dense(&self) -> Option<usize> {",
+                          "impl FunKey for %s {" % tn, "    fn dense(&self) -> Option<usize> {",
                           "        usize::try_from(self.0).ok()", "    }",
                           "    fn undense(i: usize) -> Option<Self> {", "        u32::try_from(i).ok().map(%s)" % tn,
                           "    }", "}", "",
@@ -755,7 +755,7 @@ class Emitter:
                           '        out.push_str("%s(");' % st.constructors[0][0],
                           "        out.push_str(&self.0.to_string());", "        out.push(')');", "    }", "}", ""]
             elif shape == "enumeration":
-                lines += ["impl Key for %s {}" % tn, ""]
+                lines += ["impl FunKey for %s {}" % tn, ""]
                 lines += [derive + ", Default, Copy)]", "pub enum %s {" % tn]
                 for k, (c, _, _) in enumerate(st.constructors):
                     lines.append("    %s%s," % ("#[default]\n    " if k == 0 else "", ident(c)))
@@ -765,7 +765,7 @@ class Emitter:
                 lines += ["        });", "    }", "}", ""]
             elif shape == "record":
                 c, fields, _ = st.constructors[0]
-                lines += ["impl Key for %s {}" % tn, ""]
+                lines += ["impl FunKey for %s {}" % tn, ""]
                 lines += [derive + ", Default)]", "pub struct %s {" % tn]
                 lines += ["    pub %s: %s," % (self.field(name, 0, j), self.rtype(fs)) for j, (_, fs) in enumerate(fields)]
                 lines += ["}", "", "impl M2 for %s {" % tn, "    fn m2(&self, out: &mut String) {",
@@ -776,7 +776,7 @@ class Emitter:
                     lines.append("        self.%s.m2(out);" % self.field(name, 0, j))
                 lines += ["        out.push(')');", "    }", "}", ""]
             else:
-                lines += ["impl Key for %s {}" % tn, ""]
+                lines += ["impl FunKey for %s {}" % tn, ""]
                 lines += [derive + ")]", "pub enum %s {" % tn]
                 for c, fields, _ in st.constructors:
                     lines.append("    %s%s," % (ident(c), "(%s)" % ", ".join(self.rtype(fs) for _, fs in fields) if fields else ""))

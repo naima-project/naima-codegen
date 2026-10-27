@@ -124,7 +124,7 @@ pub trait GetSet<K, V>: Get<K, V> {
 
 /// A function's key (docs/spec.md §3.11.5): an id is held densely, by its index, any
 /// other key sparsely.
-pub trait Key: Ord + Clone {
+pub trait FunKey: Ord + Clone {
     fn dense(&self) -> Option<usize> {
         None
     }
@@ -133,8 +133,8 @@ pub trait Key: Ord + Clone {
     }
 }
 
-impl Key for i128 {}
-impl Key for bool {}
+impl FunKey for i128 {}
+impl FunKey for bool {}
 
 /// A stored function: a default and the entries that differ from it, those at an id
 /// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
@@ -146,7 +146,7 @@ pub struct Fun<K: Ord, V> {
     v: Vec<V>,
 }
 
-impl<K: Key, V: Clone + PartialEq> Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
         Fun { d, m: BTreeMap::new(), v: Vec::new() }
     }
@@ -175,15 +175,15 @@ impl<K: Key, V: Clone + PartialEq> Fun<K, V> {
     }
 }
 
-impl<K: Key, V: Clone + PartialEq> PartialEq for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> PartialEq for Fun<K, V> {
     fn eq(&self, o: &Self) -> bool {
         self.d == o.d && self.entries() == o.entries()
     }
 }
 
-impl<K: Key, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
+impl<K: FunKey, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
 
-impl<K: Key, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     fn get(&self, k: &K) -> V {
         self.get_ref(k).clone()
     }
@@ -195,7 +195,7 @@ impl<K: Key, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     }
 }
 
-impl<K: Key, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
         match k.dense() {
             Some(i) => {
@@ -580,7 +580,7 @@ impl<X: M2> M2 for BTreeSet<X> {
     }
 }
 
-impl Key for JSt {}
+impl FunKey for JSt {}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Copy)]
 pub enum JSt {
@@ -609,7 +609,7 @@ impl M2 for JSt {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Copy)]
 pub struct Job(pub u32);
 
-impl Key for Job {
+impl FunKey for Job {
     fn dense(&self) -> Option<usize> {
         usize::try_from(self.0).ok()
     }
