@@ -374,6 +374,40 @@ mod rt {
             l.insert(p, u);
         }
     }
+    /// An insert ordered by a key, into a list kept sorted by that key (docs/spec.md
+    /// §3.10.7): the model's walk puts u before the first element whose key is greater,
+    /// the place a binary search finds.
+    pub fn ins_by_key<X, K: Ord>(l: &mut Vec<X>, u: X, key: impl Fn(&X) -> K) {
+        debug_assert!(l.iter().zip(l.iter().skip(1)).all(|(x, y)| key(x) <= key(y)), "a key-sorted list out of order");
+        let ku = key(&u);
+        let p = l.partition_point(|x| key(x) <= ku);
+        l.insert(p, u);
+    }
+    /// tail of a list entry, in place.
+    pub fn pop_first<X>(l: &mut Vec<X>) -> Result<(), StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        l.remove(0);
+        Ok(())
+    }
+    /// The removal of u's first occurrence, in place.
+    pub fn rem_first<X: PartialEq>(l: &mut Vec<X>, u: &X) {
+        if let Some(p) = l.iter().position(|x| x == u) {
+            l.remove(p);
+        }
+    }
+    /// tail(l) == [], read in place.
+    pub fn tail_empty<X>(l: &[X]) -> Result<bool, StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        Ok(l.len() == 1)
+    }
+    /// l with u's first occurrence removed == [], read in place.
+    pub fn rem_empty<X: PartialEq>(l: &[X], u: &X) -> bool {
+        l.is_empty() || (l.len() == 1 && l.first() == Some(u))
+    }
 }
 
 /// A malformed entry (docs/spec.md §3.14.2).
@@ -827,6 +861,14 @@ class Emitter:
                 f = self.view_ref(x.args[0].head, scope)
                 out.append("rt::head_ref((%s).get_ref(&%s))?" % (f, self.expr(x.args[0].args[0], scope)))
                 continue
+            if hn in ("==", "!=") and len(x.args) == 2 and self._empty_read(x) is not None:
+                # F(y), tail(F(y)) or r(F(y), u) == [] (§3.10.7): the entry read in place, not copied
+                kind, rd, u = self._empty_read(x)
+                f = "(%s).get_ref(&%s)" % (self.view_ref(rd.head, scope), self.expr(rd.args[0], scope))
+                t = "rt::tail_empty(%s)?" % f if kind == "tail" else "%s.is_empty()" % f if kind == "self" \
+                    else "rt::rem_empty(%s, &%s)" % (f, self.expr(u, scope))
+                out.append(t if hn == "==" else "!%s" % t)
+                continue
             if not isinstance(h, Op):  # a read F(x)
                 f = self.view_ref(h, scope)
                 out.append("(%s).get(&%s)" % (f, self.expr(x.args[0], scope)))
@@ -1220,6 +1262,27 @@ class Emitter:
     def view_ov(self, e, scope) -> str:
         code, kind = self.view(e, scope)
         return "Ov::over(%s)" % code if kind == "ref" else code
+
+    def _empty_read(self, x):
+        """For `F(y) == []`, `tail(F(y)) == []` or `r(F(y), u) == []` (r a first-occurrence
+        removal, §3.10.7), F a function read of a list: (kind, the read F(y), u); else None."""
+        for a, b in ((x.args[0], x.args[1]), (x.args[1], x.args[0])):
+            if not (isinstance(b, Op) and b.name == "[]") or not isinstance(a, App):
+                continue
+            if not isinstance(a.head, Op):
+                if len(a.args) == 1 and not is_fun(self.lps, self._sort_of(a)) \
+                        and self.types.kind(self._sort_of(a)) == "List":
+                    return ("self", a, None)
+                continue
+            rd = a.args[0] if a.args else None
+            if not (isinstance(rd, App) and not isinstance(rd.head, Op) and len(rd.args) == 1) \
+                    or is_fun(self.lps, self._sort_of(rd)):
+                continue
+            if a.head.name == "tail" and len(a.args) == 1:
+                return ("tail", rd, None)
+            if a.head.name in self.sorted.removes and len(a.args) == 2:
+                return ("rem", rd, a.args[1])
+        return None
 
     def view_ref(self, e, scope) -> str:
         code, kind = self.view(e, scope)
@@ -1790,10 +1853,17 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
     """The next state: overlays and new values first, then the writes (§3.8.4); a
     write to what an index reads dirties its id (docs/spec.md §3.8.3)."""
     lines = []
-    commits, writes, deferred, inplace = [], [], [], []
+    commits, writes, deferred, inplace, listops = [], [], [], [], []
     for n, e in s.assigns:
         if n in fps and _inplace(em, model, s, n, e, fps, watched):
             inplace.append((n, e))
+        elif n in fps and _list_op(em, model, s, n, e, watched) is not None:
+            kind, k, u, f = _list_op(em, model, s, n, e, watched)
+            t = ident(n)
+            lines.append("    let lk_%s = %s;" % (t, em.expr(k, scope)))
+            if u is not None:
+                lines.append("    let lu_%s = %s;" % (t, em.expr(u, scope)))
+            listops.append((n, kind, None if f is None else em.view_ref(f, scope)))
         elif n in fps:
             o = "o_" + ident(n)
             lines.append("    let mut %s = Ov::over(&s.%s);" % (o, ident(n)))
@@ -1896,7 +1966,45 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
             lines += ["    for x in s.%s.symmetric_difference(&%s) {" % (ident(n), t),
                       "        s.dirty_%s.push(x.0);" % watched[n], "    }"]
         lines.append("    s.%s = %s;" % (ident(n), t if r is None else 'rt::fit(%s, %d, %d, "%s")?' % (t, r[0], r[1], n)))
+    # A list entry changed in place (§3.10.7), last: every value that reads the old entry
+    # has been computed, and the key function is not written by the summand.
+    for n, kind, f in listops:
+        t = ident(n)
+        if kind == "ins":
+            lines.append("    rt::ins_by_key(s.%s.slot(lk_%s), lu_%s, |x| (%s).get(x));" % (t, t, t, f))
+        elif kind == "tail":
+            lines.append("    rt::pop_first(s.%s.slot(lk_%s))?;" % (t, t))
+        else:
+            lines.append("    rt::rem_first(s.%s.slot(lk_%s), &lu_%s);" % (t, t, t))
     return lines
+
+
+def _list_op(em, model, s, n, e, watched):
+    """The new value of the list column n as one entry k changed in place (docs/spec.md
+    §3.10.7): ("ins", k, u, F) for n[k -> f(u, n(k), F)] with f an insert ordered by a key
+    and n declared kept sorted by F (`key_sorted`), F not written by the summand;
+    ("tail", k, None, None) for n[k -> tail(n(k))]; ("rem", k, u, None) for
+    n[k -> r(n(k), u)] with r a first-occurrence removal. Else None."""
+    if (watched and n in watched) or not (isinstance(e, App) and isinstance(e.head, Op) and e.head.name == "@func_update"
+                                         and len(e.args) == 3 and isinstance(e.args[0], Var) and e.args[0].name == n):
+        return None
+    k, v = e.args[1], e.args[2]
+    if not (isinstance(v, App) and isinstance(v.head, Op)):
+        return None
+
+    def own(x):
+        return isinstance(x, App) and isinstance(x.head, Var) and x.head.name == n and len(x.args) == 1 \
+            and show(x.args[0]) == show(k)
+    h, srt = v.head.name, em.sorted
+    if h == "tail" and len(v.args) == 1 and own(v.args[0]):
+        return ("tail", k, None, None)
+    if h in srt.removes and own(v.args[0]) and not _occurs(v.args[1], n):
+        return ("rem", k, v.args[1], None)
+    f = v.args[2] if h in srt.key_inserts else None
+    if f is not None and own(v.args[1]) and not _occurs(v.args[0], n) and isinstance(f, Var) \
+            and model.config.key_sorted.get(n) == f.name and all(m != f.name for m, _ in s.assigns):
+        return ("ins", k, v.args[0], f)
+    return None
 
 
 def _inplace(em, model, s, n, e, fps: set, watched) -> bool:

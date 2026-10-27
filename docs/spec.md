@@ -1225,6 +1225,37 @@ of the list). In the oracle's audit mode (§3.9.9) every such insert and merge i
 computed by the model's walk, and a difference is an audit failure, so the
 cross-check of §3.16 compares the Rust code with the model's own definition.
 
+#### 3.10.7 Lists kept sorted by a key, and list entries changed in place
+
+A list column may instead be kept in the order of a key function `F: I -> Nat` (a
+loop's pending elements in element order): it grows through an *insert ordered by a
+key*, a user map whose equations are exactly
+
+    f(u, [], F) = [u];
+    f(u, n |> l, F) = if(F(u) < F(n), u |> (n |> l), n |> f(u, l, F));
+
+which puts `u` after every element whose key is not greater. That the column stays
+sorted by `F` depends on `F` not changing for the elements in it, which the generator
+cannot see in the summands; the declaration states it, `key_sorted = { P = "F" }`
+(column to key function, both parameters), and the model's own properties are where
+it is checked. A summand's new value `P[k -> f(u, P(k), F)]`, with `F` a parameter
+the summand does not write, is then applied in place by a binary search and an
+insert; in debug builds the Rust code first asserts that the entry is in key order.
+
+Two more updates of one entry of a list column are applied in place on any list
+column that no index reads, without a declaration: `P[k -> tail(P(k))]` (the first
+element removed) and `P[k -> r(P(k), u)]` with `r` a *first-occurrence removal*,
+
+    r([], u) = [];
+    r(n |> l, u) = if(n == u, l, n |> r(l, u));
+
+A summand's in-place list updates are applied after every other new value, so each
+reads the old state. The tests `F(y) == []`, `tail(F(y)) == []` and
+`r(F(y), u) == []` read the entry in place instead of copying it. Each of these
+replaces a copy of the whole entry (`O(k)` per firing, quadratic over a list's life)
+with an `O(log k)` search, or a shift of the elements after the place changed.
+The Python backend evaluates the model's walks.
+
 ### 3.11 The Rust backend
 
 #### 3.11.1 The crate

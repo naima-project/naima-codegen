@@ -1,0 +1,47 @@
+mcrl2_version = "202607.0"
+id_sorts = ["Item"]
+key_sorted = { q = "key" }
+
+[project]
+backends = ["rust"]
+rust_crate = "keyqueue"
+
+[[parameter]]
+name = "ni"
+role = "scalar"
+
+[[parameter]]
+name = "key"
+role = "column"
+
+[[parameter]]
+name = "fresh"
+role = "frontier"
+
+[[parameter]]
+name = "q"
+role = "column"
+
+[[parameter]]
+name = "taken"
+role = "scalar"
+
+[[action]]
+label = "c_put"
+kind = "input"
+args = ["i", "p"]
+
+[[action]]
+label = "c_take"
+kind = "input"
+args = ["i"]
+
+[[action]]
+label = "c_drop"
+kind = "input"
+args = ["i"]
+
+[[action]]
+label = "c_queue"
+kind = "output"
+args = ["i"]

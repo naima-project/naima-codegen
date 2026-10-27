@@ -339,6 +339,40 @@ mod rt {
             l.insert(p, u);
         }
     }
+    /// An insert ordered by a key, into a list kept sorted by that key (docs/spec.md
+    /// §3.10.7): the model's walk puts u before the first element whose key is greater,
+    /// the place a binary search finds.
+    pub fn ins_by_key<X, K: Ord>(l: &mut Vec<X>, u: X, key: impl Fn(&X) -> K) {
+        debug_assert!(l.iter().zip(l.iter().skip(1)).all(|(x, y)| key(x) <= key(y)), "a key-sorted list out of order");
+        let ku = key(&u);
+        let p = l.partition_point(|x| key(x) <= ku);
+        l.insert(p, u);
+    }
+    /// tail of a list entry, in place.
+    pub fn pop_first<X>(l: &mut Vec<X>) -> Result<(), StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        l.remove(0);
+        Ok(())
+    }
+    /// The removal of u's first occurrence, in place.
+    pub fn rem_first<X: PartialEq>(l: &mut Vec<X>, u: &X) {
+        if let Some(p) = l.iter().position(|x| x == u) {
+            l.remove(p);
+        }
+    }
+    /// tail(l) == [], read in place.
+    pub fn tail_empty<X>(l: &[X]) -> Result<bool, StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        Ok(l.len() == 1)
+    }
+    /// l with u's first occurrence removed == [], read in place.
+    pub fn rem_empty<X: PartialEq>(l: &[X], u: &X) -> bool {
+        l.is_empty() || (l.len() == 1 && l.first() == Some(u))
+    }
 }
 
 /// A malformed entry (docs/spec.md §3.14.2).

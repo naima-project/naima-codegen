@@ -102,6 +102,60 @@ def ordered_inserts(lps, id_sorts) -> set:
     return out
 
 
+def key_inserts(lps) -> set:
+    """The maps whose equations are exactly an insert ordered by a key function
+    (§3.10.7): `f(u, [], fN) = [u]; f(u, n |> l, fN) = if(fN(u) < fN(n), u |> (n |> l),
+    n |> f(u, l, fN))`, the element before the first whose key is greater."""
+    out = set()
+    for m in lps.maps:
+        s = m.sort
+        if s[0] != "->" or len(s[1]) != 3 or s[1][1] != ("List", s[1][0]) or s[2] != s[1][1] \
+                or s[1][2][0] != "->" or tuple(s[1][2][1]) != (s[1][0],):
+            continue
+        eqs = _equations(lps).get(m.name, [])
+        if len(eqs) != 2 or not all(isinstance(e.lhs, App) and _true(e.cond) for e in eqs):
+            continue
+        base = [e for e in eqs if _is_nil(e.lhs.args[1])]
+        step = [e for e in eqs if _head(e.lhs.args[1]) == "|>"]
+        if len(base) != 1 or len(step) != 1:
+            continue
+        b, st = base[0], step[0]
+        if not all(isinstance(a, Var) for a in (b.lhs.args[0], st.lhs.args[0], st.lhs.args[2], *st.lhs.args[1].args)):
+            continue
+        u, (n, l), f = st.lhs.args[0].name, (x.name for x in st.lhs.args[1].args), st.lhs.args[2].name
+        if len({u, n, l, f}) != 4:
+            continue
+        want_s = "if((%s(%s) < %s(%s)), (%s |> (%s |> %s)), (%s |> %s(%s, %s, %s)))" % (
+            f, u, f, n, u, n, l, n, m.name, u, l, f)
+        if show(b.rhs) == "(%s |> [])" % b.lhs.args[0].name and show(st.rhs) == want_s:
+            out.add(m.name)
+    return out
+
+
+def first_removes(lps) -> set:
+    """The maps whose equations are exactly the removal of the first occurrence of an
+    element (§3.10.7): `r([], u) = []; r(n |> l, u) = if(n == u, l, n |> r(l, u))`."""
+    out = set()
+    for m in lps.maps:
+        s = m.sort
+        if s[0] != "->" or len(s[1]) != 2 or s[1][0] != ("List", s[1][1]) or s[2] != s[1][0]:
+            continue
+        eqs = _equations(lps).get(m.name, [])
+        if len(eqs) != 2 or not all(isinstance(e.lhs, App) and _true(e.cond) for e in eqs):
+            continue
+        base = [e for e in eqs if _is_nil(e.lhs.args[0])]
+        step = [e for e in eqs if _head(e.lhs.args[0]) == "|>"]
+        if len(base) != 1 or len(step) != 1 or not _is_nil(base[0].rhs):
+            continue
+        st = step[0]
+        if not all(isinstance(a, Var) for a in (st.lhs.args[1], *st.lhs.args[0].args)):
+            continue
+        (n, l), u = (x.name for x in st.lhs.args[0].args), st.lhs.args[1].name
+        if len({n, l, u}) == 3 and show(st.rhs) == "if((%s == %s), %s, (%s |> %s(%s, %s)))" % (n, u, l, n, m.name, l, u):
+            out.add(m.name)
+    return out
+
+
 def ordered_merges(lps, inserts: set) -> set:
     """The maps whose equations are exactly an ordered merge through an ordered insert."""
     out = set()
@@ -141,6 +195,8 @@ class Sorted:
         self.merges = ordered_merges(lps, self.inserts) if self.inserts else set()
         self.columns: set = set()
         self.walks: dict = {}  # walk name -> the position of its sorted function parameter
+        self.key_inserts = key_inserts(lps)
+        self.removes = first_removes(lps)
         if not self.inserts:
             return
         init = {}
