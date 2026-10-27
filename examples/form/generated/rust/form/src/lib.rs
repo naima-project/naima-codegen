@@ -122,16 +122,33 @@ pub trait GetSet<K, V>: Get<K, V> {
     fn tidy(&mut self, _k: &K) {}
 }
 
-/// A stored function: a default and the entries that differ from it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A function's key (docs/spec.md §3.11.5): an id is held densely, by its index, any
+/// other key sparsely.
+pub trait Key: Ord + Clone {
+    fn dense(&self) -> Option<usize> {
+        None
+    }
+    fn undense(_i: usize) -> Option<Self> {
+        None
+    }
+}
+
+impl Key for i128 {}
+impl Key for bool {}
+
+/// A stored function: a default and the entries that differ from it, those at an id
+/// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
+/// others in a map.
+#[derive(Debug, Clone)]
 pub struct Fun<K: Ord, V> {
     d: V,
     m: BTreeMap<K, V>,
+    v: Vec<V>,
 }
 
-impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
+impl<K: Key, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
-        Fun { d, m: BTreeMap::new() }
+        Fun { d, m: BTreeMap::new(), v: Vec::new() }
     }
     pub fn from_parts(d: V, kv: Vec<(K, V)>) -> Self {
         let mut f = Fun::new(d);
@@ -140,37 +157,84 @@ impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
         }
         f
     }
+    /// The default.
+    pub fn default_value(&self) -> &V {
+        &self.d
+    }
+    /// The entries that differ from the default, in key order.
+    pub fn entries(&self) -> Vec<(K, &V)> {
+        let mut out: Vec<(K, &V)> = self.m.iter().map(|(k, v)| (k.clone(), v)).collect();
+        for (i, x) in self.v.iter().enumerate() {
+            if *x != self.d {
+                if let Some(k) = K::undense(i) {
+                    out.push((k, x));
+                }
+            }
+        }
+        out
+    }
 }
 
-impl<K: Ord, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
+impl<K: Key, V: Clone + PartialEq> PartialEq for Fun<K, V> {
+    fn eq(&self, o: &Self) -> bool {
+        self.d == o.d && self.entries() == o.entries()
+    }
+}
+
+impl<K: Key, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
+
+impl<K: Key, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     fn get(&self, k: &K) -> V {
-        match self.m.get(k) {
-            Some(v) => v.clone(),
-            None => self.d.clone(),
-        }
+        self.get_ref(k).clone()
     }
     fn get_ref(&self, k: &K) -> &V {
-        self.m.get(k).unwrap_or(&self.d)
+        match k.dense() {
+            Some(i) => self.v.get(i).unwrap_or(&self.d),
+            None => self.m.get(k).unwrap_or(&self.d),
+        }
     }
 }
 
-impl<K: Ord, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
+impl<K: Key, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
-        if v == self.d {
-            self.m.remove(&k);
-        } else {
-            self.m.insert(k, v);
+        match k.dense() {
+            Some(i) => {
+                if i >= self.v.len() {
+                    if v == self.d {
+                        return;
+                    }
+                    self.v.resize(i.saturating_add(1), self.d.clone());
+                }
+                if let Some(x) = self.v.get_mut(i) {
+                    *x = v;
+                }
+            }
+            None => {
+                if v == self.d {
+                    self.m.remove(&k);
+                } else {
+                    self.m.insert(k, v);
+                }
+            }
         }
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
     }
     fn slot(&mut self, k: K) -> &mut V {
+        if let Some(i) = k.dense() {
+            if i >= self.v.len() {
+                self.v.resize(i.saturating_add(1), self.d.clone());
+            }
+            if let Some(x) = self.v.get_mut(i) {
+                return x;
+            }
+        }
         let d = &self.d;
         self.m.entry(k).or_insert_with(|| d.clone())
     }
     fn tidy(&mut self, k: &K) {
-        if self.m.get(k) == Some(&self.d) {
+        if k.dense().is_none() && self.m.get(k) == Some(&self.d) {
             self.m.remove(k);
         }
     }
@@ -515,6 +579,8 @@ impl<X: M2> M2 for BTreeSet<X> {
         out.push('}');
     }
 }
+
+impl Key for Phase {}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Copy)]
 pub enum Phase {

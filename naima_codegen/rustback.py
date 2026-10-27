@@ -157,16 +157,33 @@ pub trait GetSet<K, V>: Get<K, V> {
     fn tidy(&mut self, _k: &K) {}
 }
 
-/// A stored function: a default and the entries that differ from it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A function's key (docs/spec.md §3.11.5): an id is held densely, by its index, any
+/// other key sparsely.
+pub trait Key: Ord + Clone {
+    fn dense(&self) -> Option<usize> {
+        None
+    }
+    fn undense(_i: usize) -> Option<Self> {
+        None
+    }
+}
+
+impl Key for i128 {}
+impl Key for bool {}
+
+/// A stored function: a default and the entries that differ from it, those at an id
+/// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
+/// others in a map.
+#[derive(Debug, Clone)]
 pub struct Fun<K: Ord, V> {
     d: V,
     m: BTreeMap<K, V>,
+    v: Vec<V>,
 }
 
-impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
+impl<K: Key, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
-        Fun { d, m: BTreeMap::new() }
+        Fun { d, m: BTreeMap::new(), v: Vec::new() }
     }
     pub fn from_parts(d: V, kv: Vec<(K, V)>) -> Self {
         let mut f = Fun::new(d);
@@ -175,37 +192,84 @@ impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
         }
         f
     }
+    /// The default.
+    pub fn default_value(&self) -> &V {
+        &self.d
+    }
+    /// The entries that differ from the default, in key order.
+    pub fn entries(&self) -> Vec<(K, &V)> {
+        let mut out: Vec<(K, &V)> = self.m.iter().map(|(k, v)| (k.clone(), v)).collect();
+        for (i, x) in self.v.iter().enumerate() {
+            if *x != self.d {
+                if let Some(k) = K::undense(i) {
+                    out.push((k, x));
+                }
+            }
+        }
+        out
+    }
 }
 
-impl<K: Ord, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
+impl<K: Key, V: Clone + PartialEq> PartialEq for Fun<K, V> {
+    fn eq(&self, o: &Self) -> bool {
+        self.d == o.d && self.entries() == o.entries()
+    }
+}
+
+impl<K: Key, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
+
+impl<K: Key, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     fn get(&self, k: &K) -> V {
-        match self.m.get(k) {
-            Some(v) => v.clone(),
-            None => self.d.clone(),
-        }
+        self.get_ref(k).clone()
     }
     fn get_ref(&self, k: &K) -> &V {
-        self.m.get(k).unwrap_or(&self.d)
+        match k.dense() {
+            Some(i) => self.v.get(i).unwrap_or(&self.d),
+            None => self.m.get(k).unwrap_or(&self.d),
+        }
     }
 }
 
-impl<K: Ord, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
+impl<K: Key, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
-        if v == self.d {
-            self.m.remove(&k);
-        } else {
-            self.m.insert(k, v);
+        match k.dense() {
+            Some(i) => {
+                if i >= self.v.len() {
+                    if v == self.d {
+                        return;
+                    }
+                    self.v.resize(i.saturating_add(1), self.d.clone());
+                }
+                if let Some(x) = self.v.get_mut(i) {
+                    *x = v;
+                }
+            }
+            None => {
+                if v == self.d {
+                    self.m.remove(&k);
+                } else {
+                    self.m.insert(k, v);
+                }
+            }
         }
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
     }
     fn slot(&mut self, k: K) -> &mut V {
+        if let Some(i) = k.dense() {
+            if i >= self.v.len() {
+                self.v.resize(i.saturating_add(1), self.d.clone());
+            }
+            if let Some(x) = self.v.get_mut(i) {
+                return x;
+            }
+        }
         let d = &self.d;
         self.m.entry(k).or_insert_with(|| d.clone())
     }
     fn tidy(&mut self, k: &K) {
-        if self.m.get(k) == Some(&self.d) {
+        if k.dense().is_none() && self.m.get(k) == Some(&self.d) {
             self.m.remove(k);
         }
     }
@@ -683,10 +747,15 @@ class Emitter:
             shape = t.shape[name]
             if shape == "id":
                 lines += [derive + ", Default, Copy)]", "pub struct %s(pub u32);" % tn, "",
+                          "impl Key for %s {" % tn, "    fn dense(&self) -> Option<usize> {",
+                          "        usize::try_from(self.0).ok()", "    }",
+                          "    fn undense(i: usize) -> Option<Self> {", "        u32::try_from(i).ok().map(%s)" % tn,
+                          "    }", "}", "",
                           "impl M2 for %s {" % tn, "    fn m2(&self, out: &mut String) {",
                           '        out.push_str("%s(");' % st.constructors[0][0],
                           "        out.push_str(&self.0.to_string());", "        out.push(')');", "    }", "}", ""]
             elif shape == "enumeration":
+                lines += ["impl Key for %s {}" % tn, ""]
                 lines += [derive + ", Default, Copy)]", "pub enum %s {" % tn]
                 for k, (c, _, _) in enumerate(st.constructors):
                     lines.append("    %s%s," % ("#[default]\n    " if k == 0 else "", ident(c)))
@@ -696,6 +765,7 @@ class Emitter:
                 lines += ["        });", "    }", "}", ""]
             elif shape == "record":
                 c, fields, _ = st.constructors[0]
+                lines += ["impl Key for %s {}" % tn, ""]
                 lines += [derive + ", Default)]", "pub struct %s {" % tn]
                 lines += ["    pub %s: %s," % (self.field(name, 0, j), self.rtype(fs)) for j, (_, fs) in enumerate(fields)]
                 lines += ["}", "", "impl M2 for %s {" % tn, "    fn m2(&self, out: &mut String) {",
@@ -706,6 +776,7 @@ class Emitter:
                     lines.append("        self.%s.m2(out);" % self.field(name, 0, j))
                 lines += ["        out.push(')');", "    }", "}", ""]
             else:
+                lines += ["impl Key for %s {}" % tn, ""]
                 lines += [derive + ")]", "pub enum %s {" % tn]
                 for c, fields, _ in st.constructors:
                     lines.append("    %s%s," % (ident(c), "(%s)" % ", ".join(self.rtype(fs) for _, fs in fields) if fields else ""))
@@ -2235,8 +2306,9 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     for n, srt in lps.params:
         t = em.types.resolve(srt)
         if t[0] == "->":
-            out += ["    {", "        let f = &s.%s;" % ident(n)] + em.enc_stmt(t[2], "&f.d", "        ") + \
-                   ["        codec::len(f.m.len(), out);", "        for (k, v) in f.m.iter() {"] + \
+            out += ["    {", "        let f = &s.%s;" % ident(n)] + em.enc_stmt(t[2], "f.default_value()", "        ") + \
+                   ["        let e = f.entries();", "        codec::len(e.len(), out);", "        for (k, v) in e {",
+                    "            let k = &k;"] + \
                    em.enc_stmt(t[1][0], "k", "            ") + em.enc_stmt(t[2], "v", "            ") + ["        }", "    }"]
         elif t[0] == "FSet":
             out += ["    codec::len(s.%s.len(), out);" % ident(n), "    for x in s.%s.iter() {" % ident(n)] + \

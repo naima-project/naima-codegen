@@ -1330,6 +1330,19 @@ PyO3's borrow check instead of racing.
 Not implemented yet: the binding. The tests of §3.16 compile the crate with a small
 native driver instead (§3.16.5).
 
+#### 3.11.5 Stored functions
+
+A function-sorted parameter is a `Fun<K, V>`: its default and the entries that differ
+from it. The entries at a key of an id sort (§3.3.3) are held in a vector indexed by the
+id, those at any other key in a map ordered by key; the trait `Key` says which (an id
+type's `dense` is its index). An id's entry then costs the size of `V` (a map's entry
+costs the key, the value and the map's own nodes, several times that), and reading or
+writing it is an index, not a search: the columns of a model whose ids number in the
+millions (VoxLogicA's deciding part: 78 columns over nodes, 1.49 KB a node as maps)
+stay within a few hundred bytes an id. Two functions are equal when their defaults and
+their entries differing from the default are; the state's encoding (§3.16) lists those
+entries in key order, as before.
+
 ### 3.12 The Python backend
 
 The Python backend is a target a project chooses like the others (§3.6.9). It is
