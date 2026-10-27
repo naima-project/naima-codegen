@@ -1,8 +1,8 @@
 """Lists kept sorted by a key (docs/spec.md §3.10.7), on the fixture model
 tests/fixtures/keyqueue: the insert ordered by a key and the first-occurrence
 removal are recognised from their equations; the Rust code changes the entry in
-place and gives the model's walk (every step of a random record is accepted, the
-key order checked after each insert in debug builds); and the cost of queueing,
+place and gives the model's walk (every step of a random record is accepted, in a
+debug build); and the cost of queueing,
 then taking, n elements grows linearly with n (4,000 and 40,000 elements: the
 walk that copies the list made it quadratic, bugs in VoxLogicA's for-expansion).
 

@@ -1240,7 +1240,9 @@ cannot see in the summands; the declaration states it, `key_sorted = { P = "F" }
 (column to key function, both parameters), and the model's own properties are where
 it is checked. A summand's new value `P[k -> f(u, P(k), F)]`, with `F` a parameter
 the summand does not write, is then applied in place by a binary search and an
-insert; in debug builds the Rust code first asserts that the entry is in key order.
+insert. (A check of the whole entry's order at each insert would make debug builds
+quadratic again; the cross-check of §3.16 compares the result with the Python
+backend, which evaluates the model's walk.)
 
 Two more updates of one entry of a list column are applied in place on any list
 column that no index reads, without a declaration: `P[k -> tail(P(k))]` (the first
@@ -1250,7 +1252,8 @@ element removed) and `P[k -> r(P(k), u)]` with `r` a *first-occurrence removal*,
     r(n |> l, u) = if(n == u, l, n |> r(l, u));
 
 A summand's in-place list updates are applied after every other new value, so each
-reads the old state. The tests `F(y) == []`, `tail(F(y)) == []` and
+reads the old state; an entry left equal to the column's default is dropped, as a
+write of it would be, so that the state's encoding does not depend on the path. The tests `F(y) == []`, `tail(F(y)) == []` and
 `r(F(y), u) == []` read the entry in place instead of copying it. Each of these
 replaces a copy of the whole entry (`O(k)` per firing, quadratic over a list's life)
 with an `O(log k)` search, or a shift of the elements after the place changed.

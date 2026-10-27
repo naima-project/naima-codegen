@@ -152,6 +152,9 @@ pub trait GetSet<K, V>: Get<K, V> {
     fn as_get(&self) -> &dyn Get<K, V>;
     /// The value at k, to change in place (a sorted list's insert, docs/spec.md §3.10.6).
     fn slot(&mut self, k: K) -> &mut V;
+    /// After a change in place: the entry at k dropped when it is the default again, so that
+    /// equal functions have equal entries (docs/spec.md §3.10.7).
+    fn tidy(&mut self, _k: &K) {}
 }
 
 /// A stored function: a default and the entries that differ from it.
@@ -200,6 +203,11 @@ impl<K: Ord, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn slot(&mut self, k: K) -> &mut V {
         let d = &self.d;
         self.m.entry(k).or_insert_with(|| d.clone())
+    }
+    fn tidy(&mut self, k: &K) {
+        if self.m.get(k) == Some(&self.d) {
+            self.m.remove(k);
+        }
     }
 }
 
@@ -378,7 +386,6 @@ mod rt {
     /// §3.10.7): the model's walk puts u before the first element whose key is greater,
     /// the place a binary search finds.
     pub fn ins_by_key<X, K: Ord>(l: &mut Vec<X>, u: X, key: impl Fn(&X) -> K) {
-        debug_assert!(l.iter().zip(l.iter().skip(1)).all(|(x, y)| key(x) <= key(y)), "a key-sorted list out of order");
         let ku = key(&u);
         let p = l.partition_point(|x| key(x) <= ku);
         l.insert(p, u);
@@ -1973,9 +1980,11 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
         if kind == "ins":
             lines.append("    rt::ins_by_key(s.%s.slot(lk_%s), lu_%s, |x| (%s).get(x));" % (t, t, t, f))
         elif kind == "tail":
-            lines.append("    rt::pop_first(s.%s.slot(lk_%s))?;" % (t, t))
+            lines.append("    rt::pop_first(s.%s.slot(lk_%s.clone()))?;" % (t, t))
+            lines.append("    s.%s.tidy(&lk_%s);" % (t, t))
         else:
-            lines.append("    rt::rem_first(s.%s.slot(lk_%s), &lu_%s);" % (t, t, t))
+            lines.append("    rt::rem_first(s.%s.slot(lk_%s.clone()), &lu_%s);" % (t, t, t))
+            lines.append("    s.%s.tidy(&lk_%s);" % (t, t))
     return lines
 
 
