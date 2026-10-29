@@ -963,6 +963,8 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
     if !(s.queued.clone()) {
         return Ok(false);
     }
+    #[cfg(feature = "firing")]
+    FIRING.store(1, core::sync::atomic::Ordering::Relaxed);
     let act = Action::Send(rt::add(s.tries.clone(), 1i128)?);
     let n_queued = false;
     s.queued = n_queued;
@@ -971,6 +973,26 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 }
 
 const OUTS: [fn(&mut S, &mut Vec<Action>) -> Result<bool, StepError>; 1] = [out0];
+
+/// The output summands' labels, in policy order (docs/spec.md §3.11.6).
+pub const OUTPUT_LABELS: [&str; 1] = ["c_send"];
+
+/// The index plus one, in [`OUTPUT_LABELS`], of the output summand fired last; 0:
+/// none (docs/spec.md §3.11.6). Process-wide; written only with the feature `firing`.
+#[cfg(feature = "firing")]
+pub static FIRING: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// The label of the output summand fired last, read from any thread; `None`
+/// without the feature `firing` or before the first fire (docs/spec.md §3.11.6).
+pub fn firing() -> Option<&'static str> {
+    #[cfg(feature = "firing")]
+    {
+        let i = FIRING.load(core::sync::atomic::Ordering::Relaxed);
+        return usize::try_from(i).ok().and_then(|i| i.checked_sub(1)).and_then(|i| OUTPUT_LABELS.get(i)).copied();
+    }
+    #[cfg(not(feature = "firing"))]
+    None
+}
 
 /// The output loop (docs/spec.md §3.8.3): the first enabled output in policy
 /// order, until none is.

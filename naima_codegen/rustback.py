@@ -629,6 +629,10 @@ publish.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# The firing hook (docs/spec.md §3.11.6): the output loop posts each fire's summand.
+firing = []
+
 [lints]
 workspace = true
 """
@@ -641,7 +645,39 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+# The firing hook (docs/spec.md §3.11.6): the output loop posts each fire's summand.
+firing = []
 """
+
+
+def _rust_str(t: str) -> str:
+    """A Rust string literal for `t`."""
+    return '"%s"' % t.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def firing_hook(labels: list) -> list:
+    """The firing hook (§3.11.6): the output summands' labels in policy order, the
+    slot the output loop posts into before each fire under the feature `firing`,
+    and its reader."""
+    return ["/// The output summands' labels, in policy order (docs/spec.md §3.11.6).",
+            "pub const OUTPUT_LABELS: [&str; %d] = [%s];" % (len(labels), ", ".join(_rust_str(l) for l in labels)), "",
+            "/// The index plus one, in [`OUTPUT_LABELS`], of the output summand fired last; 0:",
+            "/// none (docs/spec.md §3.11.6). Process-wide; written only with the feature `firing`.",
+            "#[cfg(feature = \"firing\")]",
+            "pub static FIRING: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);", "",
+            "/// The label of the output summand fired last, read from any thread; `None`",
+            "/// without the feature `firing` or before the first fire (docs/spec.md §3.11.6).",
+            "pub fn firing() -> Option<&'static str> {",
+            "    #[cfg(feature = \"firing\")]",
+            "    {",
+            "        let i = FIRING.load(core::sync::atomic::Ordering::Relaxed);",
+            "        return usize::try_from(i).ok().and_then(|i| i.checked_sub(1)).and_then(|i| OUTPUT_LABELS.get(i)).copied();",
+            "    }",
+            "    #[cfg(not(feature = \"firing\"))]",
+            "    None",
+            "}", ""]
 
 
 def cargo_toml(package: str, workspace: bool) -> str:
@@ -2282,17 +2318,24 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     for n, _ in lps.params:
         pscope[n] = ("(&s.%s)" % ident(n), "ref") if n in fps else ("s.%s" % ident(n), "val")
     outs = []
+    labels = []
     for j, k in enumerate(st.outputs):
         s = lps.summands[k]
         a = next(a for a in outputs if a.label == s.label and len(a.sorts) == len(s.args))
         out += ["// %s" % s.name, "fn out%d(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {" % j,
-                "    if !(%s) {" % em.expr(s.cond, pscope), "        return Ok(false);", "    }"]
+                "    if !(%s) {" % em.expr(s.cond, pscope), "        return Ok(false);", "    }",
+                # The firing hook (§3.11.6): one relaxed store, compiled only with the feature.
+                "    #[cfg(feature = \"firing\")]",
+                "    FIRING.store(%d, core::sync::atomic::Ordering::Relaxed);" % (j + 1)]
+        labels.append(s.name)
         args = [em.expr(x, pscope) for x in s.args]
         out.append("    let act = Action::%s%s;" % (camel(a.label), "(%s)" % ", ".join(args) if args else ""))
         out += _fire_body(em, m, s, dict(pscope), fps, st.watched)
         out += ["    out.push(act);", "    Ok(true)", "}", ""]
         outs.append("out%d" % j)
-    out += ["const OUTS: [fn(&mut S, &mut Vec<Action>) -> Result<bool, StepError>; %d] = [%s];" % (len(outs), ", ".join(outs)), "",
+    out += ["const OUTS: [fn(&mut S, &mut Vec<Action>) -> Result<bool, StepError>; %d] = [%s];" % (len(outs), ", ".join(outs)), ""]
+    out += firing_hook(labels)
+    out += [
             "/// The output loop (docs/spec.md §3.8.3): the first enabled output in policy",
             "/// order, until none is.",
             "fn run_loop(s: &mut S, out: &mut Vec<Action>) -> Result<(), StepError> {",

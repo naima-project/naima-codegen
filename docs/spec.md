@@ -1343,6 +1343,25 @@ stay within a few hundred bytes an id. Two functions are equal when their defaul
 their entries differing from the default are; the state's encoding (§3.16) lists those
 entries in key order, as before.
 
+#### 3.11.6 The firing hook
+
+An embedding that watches the stepper from another thread (a stall monitor, a
+diagnostic dump) can learn which output summand a long step is in. The crate has a
+feature `firing`, off by default. It always exports `OUTPUT_LABELS`, the output
+summands' names in policy order (§3.8.3), and `firing() -> Option<&'static str>`.
+With the feature on, it also exports `FIRING`, a process-wide `AtomicU32`, and each
+output summand, once its condition holds and before its action and next state are
+computed, stores its index in `OUTPUT_LABELS` plus one into `FIRING`: one relaxed
+store, no allocation. `firing()` reads that slot and gives the label of the summand
+fired last; it gives `None` before the first fire and always without the feature.
+Without the feature, the code compiles to exactly what it was before: the hook costs
+nothing when unused.
+
+The slot is written, never read, by the generated code, so it changes no behaviour,
+no state and no action: §3.8.6 and §3.8.7 hold as before (a relaxed store is not a
+lock and waits for nothing). The slot is shared by every state in the process; an
+embedding that steps several states at once reads the last fire of any of them.
+
 ### 3.12 The Python backend
 
 The Python backend is a target a project chooses like the others (§3.6.9). It is
