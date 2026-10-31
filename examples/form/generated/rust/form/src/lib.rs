@@ -33,17 +33,104 @@ pub enum StepError {
 /// An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class an
 /// ordered set of (order key, id); the order key is the id (least), the key's
 /// value (key), minus the entry stamp (newest) or the stamp (oldest).
+///
+/// An index with groups keeps the members of each (class, group) in `sub`, with
+/// the group's admission, and per class in `sets` the front of each non-empty
+/// admitted (class, group): the front of a class is then its first admitted member.
 #[derive(Debug, Clone, Default)]
 pub struct Ix {
     order: u8,
     ent: BTreeMap<u32, (usize, i128)>,
     sets: Vec<BTreeSet<(i128, u32)>>,
     stamp: i128,
+    grp: BTreeMap<u32, i128>,
+    sub: BTreeMap<(usize, i128), (BTreeSet<(i128, u32)>, bool)>,
 }
 
 impl Ix {
     pub fn new(order: u8, ncls: usize) -> Ix {
-        Ix { order, ent: BTreeMap::new(), sets: vec![BTreeSet::new(); ncls], stamp: 0 }
+        Ix { order, ent: BTreeMap::new(), sets: vec![BTreeSet::new(); ncls], stamp: 0, grp: BTreeMap::new(),
+             sub: BTreeMap::new() }
+    }
+
+    /// The order key a member takes; a member keeps its stamp (newest, oldest).
+    fn order_key(&mut self, v: u32, k: i128, old: Option<(usize, i128)>) -> Result<i128, StepError> {
+        Ok(match (self.order, old) {
+            (0, _) => i128::from(v),
+            (1 | 4, _) => k,
+            (_, Some((_, o))) => o,
+            (o, None) => {
+                self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
+                if o == 2 { self.stamp.checked_neg().ok_or(StepError::Overflow("stamp"))? } else { self.stamp }
+            }
+        })
+    }
+
+    /// The front of a (class, group) when it is admitted.
+    fn top(&self, c: usize, g: i128) -> Option<(i128, u32)> {
+        self.sub.get(&(c, g)).filter(|e| e.1).and_then(|e| e.0.first().copied())
+    }
+
+    fn swap_top(&mut self, c: usize, before: Option<(i128, u32)>, after: Option<(i128, u32)>) -> Result<(), StepError> {
+        if before != after {
+            let set = self.sets.get_mut(c).ok_or(StepError::Undefined("index class"))?;
+            if let Some(b) = before {
+                set.remove(&b);
+            }
+            if let Some(a) = after {
+                set.insert(a);
+            }
+        }
+        Ok(())
+    }
+
+    /// The index at one id after a write, for an index with groups: member or not, its
+    /// class, group and key, and whether its (class, group) is admitted (§3.7.6).
+    pub fn refresh_g(&mut self, v: u32, m: bool, c: usize, g: i128, k: i128, a: bool) -> Result<(), StepError> {
+        let old = self.ent.get(&v).copied();
+        if let (Some((oc, ok)), Some(og)) = (old, self.grp.get(&v).copied()) {
+            let before = self.top(oc, og);
+            if let Some(e) = self.sub.get_mut(&(oc, og)) {
+                e.0.remove(&(ok, v));
+                if e.0.is_empty() {
+                    self.sub.remove(&(oc, og));
+                }
+            }
+            let after = self.top(oc, og);
+            self.swap_top(oc, before, after)?;
+            self.ent.remove(&v);
+            self.grp.remove(&v);
+        }
+        if !m {
+            return Ok(());
+        }
+        let ok = self.order_key(v, k, old)?;
+        if c >= self.sets.len() {
+            return Err(StepError::Undefined("index class"));
+        }
+        self.ent.insert(v, (c, ok));
+        self.grp.insert(v, g);
+        let before = self.top(c, g);
+        let e = self.sub.entry((c, g)).or_default();
+        e.1 = a;
+        e.0.insert((ok, v));
+        let after = self.top(c, g);
+        self.swap_top(c, before, after)
+    }
+
+    /// Whether a (class, group) has a member; only then is its admission kept.
+    pub fn has(&self, c: usize, g: i128) -> bool {
+        self.sub.contains_key(&(c, g))
+    }
+
+    /// The admission of a non-empty (class, group), after a write to a table it reads (§3.7.6).
+    pub fn set_adm(&mut self, c: usize, g: i128, a: bool) -> Result<(), StepError> {
+        let before = self.top(c, g);
+        if let Some(e) = self.sub.get_mut(&(c, g)) {
+            e.1 = a;
+        }
+        let after = self.top(c, g);
+        self.swap_top(c, before, after)
     }
 
     /// The index at one id after a write: member or not, its class and key (§3.8.3).
