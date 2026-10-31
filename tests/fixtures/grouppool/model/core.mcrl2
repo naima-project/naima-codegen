@@ -1,0 +1,36 @@
+% core.mcrl2 -- a pool whose one-at-a-time jobs (class KONE) hold one slot per group
+% (docs/spec.md §3.7.6): a ready KONE item runs when its group's slot is free, whatever
+% the other groups hold; a KANY item runs at once. Items are added ready, with a class,
+% a group and a priority flag; a running item finishes and frees its slot.
+
+sort Item = struct item(ix: Nat);
+sort Kind = struct KANY | KONE;
+sort Grp = struct G0 | G1;
+
+map  room: Kind # Nat -> Bool;                         % a class admits one more running job
+     gnum: Grp -> Nat;
+var  k: Kind; a: Nat;
+eqn  room(k, a) = k != KONE || a < 1;
+     gnum(G0) = 0;
+     gnum(G1) = 1;
+
+act  c_add: Item # Kind # Grp # Bool;
+     c_done: Item;
+     c_run: Item;
+
+proc Core(ni: Nat, st: Item -> Nat, kd: Item -> Kind, grp: Item -> Nat, hi: Item -> Bool,
+          occ: Kind -> Nat, occg: Nat -> Nat) =
+%@input
+    sum i: Item, c: Kind, g: Grp, h: Bool . (ix(i) == ni) ->
+      c_add(i, c, g, h) . Core(ni = ni + 1, st = st[i -> 1], kd = kd[i -> c], grp = grp[i -> gnum(g)], hi = hi[i -> h])
+%@input
+  + sum i: Item . (st(i) == 2) ->
+      c_done(i) . Core(st = st[i -> 3], occ = occ[kd(i) -> Int2Nat(occ(kd(i)) - 1)],
+                       occg = if(kd(i) == KONE, occg[grp(i) -> Int2Nat(occg(grp(i)) - 1)], occg))
+%@order 1
+  + sum i: Item . (st(i) == 1 && room(kd(i), if(kd(i) == KONE, occg(grp(i)), occ(kd(i))))) ->
+      c_run(i) . Core(st = st[i -> 2], occ = occ[kd(i) -> occ(kd(i)) + 1],
+                      occg = if(kd(i) == KONE, occg[grp(i) -> occg(grp(i)) + 1], occg))
+
+%@observers
+  + delta;

@@ -31,11 +31,12 @@ class IndexCode:
     name: str
     sort: str  # the id sort of its members
     order: str
-    eqs: dict  # "mem", "cls", "adm", "key", "bound" -> (argument variables, right side)
+    eqs: dict  # "mem", "cls", "adm", "grp", "admg", "key", "bound" -> (argument variables, right side)
     classes: list = field(default_factory=list)  # constructors of the class sort, declaration order
     cls_sort: str | None = None
     watched: list = field(default_factory=list)  # parameters whose writes dirty an id (member, class, key)
     within: str | None = None  # order within: the index whose order key it takes (refreshed before it)
+    tables: list = field(default_factory=list)  # tables the admission of a group reads: a write at g refreshes group g
 
 
 @dataclass
@@ -46,6 +47,7 @@ class Stepper:
     outputs: list  # in policy order
     indexes: list  # IndexCode
     watched: dict  # parameter -> id sort of the ids its writes dirty
+    tables: dict = field(default_factory=dict)  # table -> the indexes whose group admission reads it (§3.7.6)
 
 
 def build(model: Model, refined: Refined, core_text: str, init_text: str, tools) -> Stepper:
@@ -105,7 +107,11 @@ def build(model: Model, refined: Refined, core_text: str, init_text: str, tools)
     m2.walks = dict(model.walks, **pwalks)
     m2.fun_maps = dict(model.fun_maps, **pfun)
     indexes, watched = _indexes(lps, refined, model)
-    return Stepper(m2, refined, inputs, outputs, indexes, watched)
+    tables: dict = {}
+    for ic in indexes:
+        for p in ic.tables:
+            tables.setdefault(p, []).append(ic.name)
+    return Stepper(m2, refined, inputs, outputs, indexes, watched, tables)
 
 
 def _indexes(lps, refined: Refined, model: Model):
@@ -118,7 +124,7 @@ def _indexes(lps, refined: Refined, model: Model):
     out, watched = [], {}
     for name, info in refined.indexes.items():
         ic = IndexCode(name, info.sort, info.order, {}, within=info.within)
-        for part in ("mem", "cls", "adm", "key", "bound"):
+        for part in ("mem", "cls", "adm", "grp", "admg", "key", "bound"):
             e = eqs.get("ix_%s_%s" % (part, name))
             if e is None:
                 continue
@@ -127,7 +133,8 @@ def _indexes(lps, refined: Refined, model: Model):
         if info.cls_sort:
             ic.cls_sort = info.cls_sort
             ic.classes = [c for c, _, _ in lps.structs[info.cls_sort].constructors]
-        ic.watched = list(dict.fromkeys(info.mem_args + info.cls_args + info.key_args))
+        ic.watched = list(dict.fromkeys(info.mem_args + info.cls_args + info.key_args + info.grp_args))
+        ic.tables = list(info.admg_args)
         for p in ic.watched:
             watched[p] = info.sort
         out.append(ic)

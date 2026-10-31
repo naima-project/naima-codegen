@@ -110,13 +110,90 @@ class _Index:
     key's value (key), minus the entry stamp (newest), the stamp (oldest), the
     order key of the index it is within (within)."""
 
-    __slots__ = ("order", "ent", "heaps", "stamp")
+    __slots__ = ("order", "ent", "heaps", "stamp", "grouped", "grp", "sub")
 
-    def __init__(self, order, ncls):
+    def __init__(self, order, ncls, grouped=False):
         self.order = order  # 0 least, 1 key, 2 newest, 3 oldest, 4 within
         self.ent = {}  # id -> (class, order key)
         self.heaps = [[] for _ in range(ncls)]
         self.stamp = 0
+        # With groups (docs/spec.md §3.7.6): a member's group; per non-empty (class, group)
+        # [heap of (order key, id), admitted, members]; heaps[c] then holds the fronts
+        # (order key, id, group) of the admitted (class, group)s of class c.
+        self.grouped = grouped
+        self.grp = {}
+        self.sub = {}
+
+    def _sfront(self, c, g):
+        e = self.sub.get((c, g))
+        if e is None:
+            return None
+        h, ent, grp = e[0], self.ent, self.grp
+        while h:
+            ok, v = h[0]
+            if ent.get(v) == (c, ok) and grp.get(v) == g:
+                return h[0]
+            heapq.heappop(h)
+        return None
+
+    def _push_top(self, c, g):
+        e = self.sub.get((c, g))
+        if e is not None and e[1]:
+            f = self._sfront(c, g)
+            if f is not None:
+                h = self.heaps[c]
+                heapq.heappush(h, (f[0], f[1], g))
+                if len(h) > 2 * len(self.sub) + 16:
+                    h[:] = [(t[0], t[1], gg) for (cc, gg), x in self.sub.items() if cc == c and x[1]
+                            for t in (self._sfront(cc, gg),) if t is not None]
+                    heapq.heapify(h)
+
+    def refresh_g(self, v, m, c, g, k, a):
+        """The index at one id after a write, with groups: member or not, its class,
+        group and key, and whether its (class, group) is admitted (§3.7.6)."""
+        old = self.ent.get(v)
+        if old is not None:
+            og = self.grp.pop(v)
+            del self.ent[v]
+            e = self.sub[(old[0], og)]
+            e[2] -= 1
+            if e[2] == 0:
+                del self.sub[(old[0], og)]
+            else:
+                self._push_top(old[0], og)
+        if not m:
+            return
+        o = self.order
+        if o == 0:
+            ok = v
+        elif o in (1, 4):
+            ok = k
+        elif old is not None:
+            ok = old[1]
+        else:
+            self.stamp += 1
+            ok = -self.stamp if o == 2 else self.stamp
+        self.ent[v] = (c, ok)
+        self.grp[v] = g
+        e = self.sub.setdefault((c, g), [[], a, 0])
+        e[1] = a
+        e[2] += 1
+        h = e[0]
+        heapq.heappush(h, (ok, v))
+        if len(h) > 2 * e[2] + 16:
+            h[:] = [(x[1], y) for y, x in self.ent.items() if x[0] == c and self.grp[y] == g]
+            heapq.heapify(h)
+        self._push_top(c, g)
+
+    def has(self, c, g):
+        return (c, g) in self.sub
+
+    def set_adm(self, c, g, a):
+        """The admission of a non-empty (class, group), after a write to a table it reads."""
+        e = self.sub.get((c, g))
+        if e is not None:
+            e[1] = a
+            self._push_top(c, g)
 
     def refresh(self, v, m, c, k):
         old = self.ent.get(v)
@@ -146,6 +223,14 @@ class _Index:
     def _front(self, c):
         h = self.heaps[c]
         ent = self.ent
+        if self.grouped:
+            while h:
+                ok, v, g = h[0]
+                e = self.sub.get((c, g))
+                if e is not None and e[1] and self._sfront(c, g) == (ok, v):
+                    return (ok, v)
+                heapq.heappop(h)
+            return None
         while h:
             ok, v = h[0]
             e = ent.get(v)

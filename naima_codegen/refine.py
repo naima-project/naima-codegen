@@ -294,6 +294,8 @@ class IndexInfo:
     key_sort: str | None
     list_param: str | None  # ix_<name> for newest and oldest
     within: str | None = None  # order within: the newest/oldest index whose list it walks (§3.7.4 item 4)
+    grp_args: list = field(default_factory=list)  # parameters the group reads (§3.7.6)
+    admg_args: list = field(default_factory=list)  # tables the admission of a group reads
 
 
 def refine(core_text: str, policy: Policy, kinds: dict | None = None) -> Refined:
@@ -530,7 +532,7 @@ def _index_infos(policy: Policy, ct: CoreText, params: dict, g) -> dict:
             name, ix.sort, ct.ids[ix.sort], ix.order, args_of(ix.member), args_of(ix.cls), args_of(ix.key),
             args_of(ix.adm_when), args_of(ix.bound), codomain(ix.cls, ix.var, "class", name),
             codomain(ix.key, ix.var, "key", name, ix.key_sort), "ix_%s" % name if ix.order in ("newest", "oldest") else None,
-            ix.within)
+            ix.within, args_of(ix.group), args_of(ix.admg_when))
         if ix.within is not None:
             j = policy.index.get(ix.within)
             why = None
@@ -561,12 +563,17 @@ def _all_args(ix: IndexInfo) -> list:
     if ix.within:
         return _ok_args(ix)
     if ix.list_param:
-        return _union(ix.cls_args, ix.adm_args)
-    return _union(ix.mem_args, ix.cls_args, ix.key_args, ix.adm_args, ix.bound_args)
+        return _adm_all_args(ix)
+    return _union(ix.mem_args, ix.cls_args, ix.key_args, ix.adm_args, ix.grp_args, ix.admg_args, ix.bound_args)
 
 
 def _ok_args(ix: IndexInfo) -> list:
-    return _union(ix.mem_args, ix.cls_args, ix.adm_args)
+    return _union(ix.mem_args, _adm_all_args(ix))
+
+
+def _adm_all_args(ix: IndexInfo) -> list:
+    """The parameters whether a member's class and group are admitted reads (§3.7.6)."""
+    return _union(ix.cls_args, ix.adm_args, ix.grp_args, ix.admg_args)
 
 
 def _definitions(policy: Policy, indexes: dict, least_sorts: list, ct: CoreText) -> str:
@@ -623,6 +630,27 @@ def _definitions(policy: Policy, indexes: dict, least_sorts: list, ct: CoreText)
             out.append(mapdecl("ix_adm_%s" % name, info.adm_args, [info.cls_sort], "Bool"))
             out.append(decl(info.adm_args, ["ix_k: %s" % info.cls_sort]))
             out.append("eqn %s = %s;" % (call("ix_adm_%s" % name, info.adm_args, ["ix_k"]), tr(ix.adm_when, ix.adm_var, "ix_k")))
+        if ix.group is not None:
+            out.append(mapdecl("ix_grp_%s" % name, info.grp_args, [I], "Nat"))
+            out.append(decl(info.grp_args, ["ix_v: %s" % I]))
+            out.append("eqn %s = %s;" % (call("ix_grp_%s" % name, info.grp_args, ["ix_v"]), tr(ix.group, ix.var, "ix_v")))
+            out.append(mapdecl("ix_admg_%s" % name, info.admg_args, [info.cls_sort, "Nat"], "Bool"))
+            out.append(decl(info.admg_args, ["ix_k: %s" % info.cls_sort, "ix_g: Nat"]))
+            gm = {p: vmap[p] for p in idents(ix.admg_when) if p in params}
+            gm[ix.adm_var] = "ix_k"
+            gm[ix.admg_var] = "ix_g"
+            out.append("eqn %s = %s;" % (call("ix_admg_%s" % name, info.admg_args, ["ix_k", "ix_g"]),
+                                         _plain_subst(ix.admg_when, gm)))
+
+        def admitted(y):
+            """Whether the class (and the group) of the member y are admitted (§3.7.6)."""
+            if ix.cls is None:
+                return "true"
+            k = call("ix_cls_%s" % name, info.cls_args, [y])
+            a = call("ix_adm_%s" % name, info.adm_args, [k])
+            if ix.group is not None:
+                a = "%s && %s" % (a, call("ix_admg_%s" % name, info.admg_args, [k, call("ix_grp_%s" % name, info.grp_args, [y])]))
+            return a
         if ix.key is not None:
             out.append(mapdecl("ix_key_%s" % name, info.key_args, [I], info.key_sort))
             out.append(decl(info.key_args, ["ix_v: %s" % I]))
@@ -636,7 +664,7 @@ def _definitions(policy: Policy, indexes: dict, least_sorts: list, ct: CoreText)
         out.append(decl(ok_args, ["ix_v: %s" % I]))
         okv = call("ix_mem_%s" % name, info.mem_args, ["ix_v"])
         if ix.cls is not None:
-            okv = "%s && %s" % (okv, call("ix_adm_%s" % name, info.adm_args, [call("ix_cls_%s" % name, info.cls_args, ["ix_v"])]))
+            okv = "%s && %s" % (okv, admitted("ix_v"))
         out.append("eqn %s = %s;" % (call("ix_ok_%s" % name, ok_args, ["ix_v"]), okv))
         q = _all_args(info)
         if info.within:
@@ -654,8 +682,7 @@ def _definitions(policy: Policy, indexes: dict, least_sorts: list, ct: CoreText)
             continue
         if info.list_param:
             L = "List(%s)" % I
-            adm = ("%s" % call("ix_adm_%s" % name, info.adm_args, [call("ix_cls_%s" % name, info.cls_args, ["ix_y"])])
-                   if ix.cls is not None else "true")
+            adm = admitted("ix_y")
             out.append(mapdecl("ix_first_%s" % name, [], [L] + [params[a] for a in q], I))
             out.append(mapdecl("ix_some_%s" % name, [], [L] + [params[a] for a in q], "Bool"))
             out.append(decl(q, ["ix_y: %s" % I, "ix_l: %s" % L]))

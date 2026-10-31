@@ -1,0 +1,31 @@
+# policy.toml -- the policy of the group pool (docs/spec.md §3.7.1, §3.7.6): the newest
+# ready item first, the items of high priority before the others; a KONE item is admitted
+# by its group's slot (occg at its group), every other class by its own count.
+
+order = ["c_run"]
+
+[index.ready]
+sort = "Item"
+var = "n"
+bound = "ni"
+member = "st(n) == 1"
+order = "newest"
+class = "kd(n)"
+admits = { var = "k", when = "k == KONE || room(k, occ(k))" }
+group = "grp(n)"
+admits_group = { var = "g", when = "k != KONE || room(k, occg(g))" }
+
+[index.readyHi]
+sort = "Item"
+var = "n"
+bound = "ni"
+member = "st(n) == 1 && hi(n)"
+order = "within"
+within = "ready"
+class = "kd(n)"
+admits = { var = "k", when = "k == KONE || room(k, occ(k))" }
+group = "grp(n)"
+admits_group = { var = "g", when = "k != KONE || room(k, occg(g))" }
+
+[select.c_run]
+i = { term = "if(some(readyHi), first(readyHi), first(ready))", when = "some(ready)" }

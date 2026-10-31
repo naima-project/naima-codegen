@@ -1,0 +1,6 @@
+% observers.mcrl2 -- observers of the group pool, for verification only (docs/spec.md §3.9.2).
+% @act
+act o_wait: Item;
+% @summands
+  % at the end of a step no ready item waits whose class and group have room
+  + sum i: Item . (QUIESCENT && st(i) == 1 && room(kd(i), if(kd(i) == KONE, occg(grp(i)), occ(kd(i))))) -> o_wait(i) . Core()

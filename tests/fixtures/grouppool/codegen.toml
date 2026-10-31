@@ -1,0 +1,51 @@
+mcrl2_version = "202607.0"
+id_sorts = ["Item"]
+
+[project]
+backends = ["rust", "python", "typescript"]
+rust_crate = "grouppool"
+python_package = "grouppool"
+typescript_module = "grouppool"
+
+[[parameter]]
+name = "ni"
+role = "scalar"
+
+[[parameter]]
+name = "st"
+role = "column"
+
+[[parameter]]
+name = "kd"
+role = "column"
+
+[[parameter]]
+name = "grp"
+role = "column"
+
+[[parameter]]
+name = "hi"
+role = "column"
+
+[[parameter]]
+name = "occ"
+role = "table"
+
+[[parameter]]
+name = "occg"
+role = "map"
+
+[[action]]
+label = "c_add"
+kind = "input"
+args = ["i", "c", "g", "h"]
+
+[[action]]
+label = "c_done"
+kind = "input"
+args = ["i"]
+
+[[action]]
+label = "c_run"
+kind = "output"
+args = ["i"]

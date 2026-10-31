@@ -1,0 +1,8 @@
+% @items 4
+% two groups: a KONE item of group 0, then one of group 1 (it runs while group 0 is busy),
+% then one more of each group, the last of high priority.
+var j: Nat;
+eqn I_n(@I) = 4;
+    I_c(@I, j) = KONE;
+    I_g(@I, j) = if(j mod 2 == 0, G0, G1);
+    I_h(@I, j) = j == 3;

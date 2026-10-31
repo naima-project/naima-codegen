@@ -68,17 +68,104 @@ pub enum StepError {
 /// An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class an
 /// ordered set of (order key, id); the order key is the id (least), the key's
 /// value (key), minus the entry stamp (newest) or the stamp (oldest).
+///
+/// An index with groups keeps the members of each (class, group) in `sub`, with
+/// the group's admission, and per class in `sets` the front of each non-empty
+/// admitted (class, group): the front of a class is then its first admitted member.
 #[derive(Debug, Clone, Default)]
 pub struct Ix {
     order: u8,
     ent: BTreeMap<u32, (usize, i128)>,
     sets: Vec<BTreeSet<(i128, u32)>>,
     stamp: i128,
+    grp: BTreeMap<u32, i128>,
+    sub: BTreeMap<(usize, i128), (BTreeSet<(i128, u32)>, bool)>,
 }
 
 impl Ix {
     pub fn new(order: u8, ncls: usize) -> Ix {
-        Ix { order, ent: BTreeMap::new(), sets: vec![BTreeSet::new(); ncls], stamp: 0 }
+        Ix { order, ent: BTreeMap::new(), sets: vec![BTreeSet::new(); ncls], stamp: 0, grp: BTreeMap::new(),
+             sub: BTreeMap::new() }
+    }
+
+    /// The order key a member takes; a member keeps its stamp (newest, oldest).
+    fn order_key(&mut self, v: u32, k: i128, old: Option<(usize, i128)>) -> Result<i128, StepError> {
+        Ok(match (self.order, old) {
+            (0, _) => i128::from(v),
+            (1 | 4, _) => k,
+            (_, Some((_, o))) => o,
+            (o, None) => {
+                self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
+                if o == 2 { self.stamp.checked_neg().ok_or(StepError::Overflow("stamp"))? } else { self.stamp }
+            }
+        })
+    }
+
+    /// The front of a (class, group) when it is admitted.
+    fn top(&self, c: usize, g: i128) -> Option<(i128, u32)> {
+        self.sub.get(&(c, g)).filter(|e| e.1).and_then(|e| e.0.first().copied())
+    }
+
+    fn swap_top(&mut self, c: usize, before: Option<(i128, u32)>, after: Option<(i128, u32)>) -> Result<(), StepError> {
+        if before != after {
+            let set = self.sets.get_mut(c).ok_or(StepError::Undefined("index class"))?;
+            if let Some(b) = before {
+                set.remove(&b);
+            }
+            if let Some(a) = after {
+                set.insert(a);
+            }
+        }
+        Ok(())
+    }
+
+    /// The index at one id after a write, for an index with groups: member or not, its
+    /// class, group and key, and whether its (class, group) is admitted (§3.7.6).
+    pub fn refresh_g(&mut self, v: u32, m: bool, c: usize, g: i128, k: i128, a: bool) -> Result<(), StepError> {
+        let old = self.ent.get(&v).copied();
+        if let (Some((oc, ok)), Some(og)) = (old, self.grp.get(&v).copied()) {
+            let before = self.top(oc, og);
+            if let Some(e) = self.sub.get_mut(&(oc, og)) {
+                e.0.remove(&(ok, v));
+                if e.0.is_empty() {
+                    self.sub.remove(&(oc, og));
+                }
+            }
+            let after = self.top(oc, og);
+            self.swap_top(oc, before, after)?;
+            self.ent.remove(&v);
+            self.grp.remove(&v);
+        }
+        if !m {
+            return Ok(());
+        }
+        let ok = self.order_key(v, k, old)?;
+        if c >= self.sets.len() {
+            return Err(StepError::Undefined("index class"));
+        }
+        self.ent.insert(v, (c, ok));
+        self.grp.insert(v, g);
+        let before = self.top(c, g);
+        let e = self.sub.entry((c, g)).or_default();
+        e.1 = a;
+        e.0.insert((ok, v));
+        let after = self.top(c, g);
+        self.swap_top(c, before, after)
+    }
+
+    /// Whether a (class, group) has a member; only then is its admission kept.
+    pub fn has(&self, c: usize, g: i128) -> bool {
+        self.sub.contains_key(&(c, g))
+    }
+
+    /// The admission of a non-empty (class, group), after a write to a table it reads (§3.7.6).
+    pub fn set_adm(&mut self, c: usize, g: i128, a: bool) -> Result<(), StepError> {
+        let before = self.top(c, g);
+        if let Some(e) = self.sub.get_mut(&(c, g)) {
+            e.1 = a;
+        }
+        let after = self.top(c, g);
+        self.swap_top(c, before, after)
     }
 
     /// The index at one id after a write: member or not, its class and key (§3.8.3).
@@ -798,6 +885,8 @@ class Emitter:
         self.walks = model.walks
         # queue parameters (repr deque): a VecDeque in S, read at its head, tailed and appended in place
         self.deques = {p.name for p in model.params if p.repr == "deque"}
+        # tables a group admission reads (docs/spec.md §3.7.6): a write at g dirties group g
+        self.tables: dict = {}
         self.n = 0
         # occurrences of a variable whose value is moved, not cloned: {id(Var): code} (see takes)
         self.moves = {}
@@ -2123,6 +2212,8 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
         lines += ["    for (k, v) in w_%s {" % ident(n)]
         if watched and n in watched:
             lines.append("        s.dirty_%s.push(k.0);" % watched[n])
+        if n in em.tables:
+            lines.append("        s.tdirty_%s.push(k);" % ident(n))
         lines += ["        s.%s.set(k, %s);" % (ident(n), v), "    }"]
     for n, t in writes:
         if isinstance(t, tuple) and t[0] == "set":
@@ -2304,10 +2395,14 @@ _ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3, "within": 4}
 
 def _stepper_fields(st) -> list:
     sorts = sorted({ix.sort for ix in st.indexes} | set(st.watched.values()))
-    return [("dirty_%s" % x, "Vec<u32>") for x in sorts] + [("ix_%s" % ix.name, "Ix") for ix in st.indexes]
+    return ([("dirty_%s" % x, "Vec<u32>") for x in sorts] + [("tdirty_%s" % ident(p), "Vec<i128>") for p in sorted(st.tables)]
+            + [("ix_%s" % ix.name, "Ix") for ix in st.indexes])
 
 
-def _ix_fn(em: Emitter, ix, part: str, arg: str | None, argty: str | None, res: str, mut: bool = False) -> list:
+def _ix_fn(em: Emitter, ix, part: str, arg: str | None, argty: str | None, res: str, mut: bool = False,
+           extra: tuple | None = None) -> list:
+    """fn ix<part>_<name>(s[, arg][, extra]) from the index's equation; extra, a second
+    argument (the group of admits_group, after the class), binds the equation's ix_g."""
     args, rhs = ix.eqs[part]
     fps = {n for n, srt in em.lps.params if is_fun(em.lps, srt)}
     scope = {}
@@ -2315,9 +2410,11 @@ def _ix_fn(em: Emitter, ix, part: str, arg: str | None, argty: str | None, res: 
         if a.startswith("ix_p_"):
             p = a[len("ix_p_"):]
             scope[a] = ("(&s.%s)" % ident(p), "ref") if p in fps else ("s.%s" % ident(p), "val")
+        elif extra is not None and a == "ix_g":
+            scope[a] = (extra[0], "val")
         else:
             scope[a] = (arg, "val")
-    sig = "s: &S" + (", %s: %s" % (arg, argty) if arg else "")
+    sig = "s: &S" + (", %s: %s" % (arg, argty) if arg else "") + (", %s: %s" % extra if extra else "")
     return ["fn ix%s_%s(%s) -> Result<%s, StepError> {" % (part, ix.name, sig, res),
             "    Ok(%s)" % em.expr(rhs, scope), "}", ""]
 
@@ -2326,10 +2423,22 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     m = st.model
     lps = m.lps
     fps = {n for n, srt in lps.params if is_fun(lps, srt)}
+    em.tables = st.tables
     out = []
     for ix in st.indexes:
         it = type_name(ix.sort)
         out += _ix_fn(em, ix, "mem", "v", it, "bool")
+        if "grp" in ix.eqs:
+            ct = type_name(ix.cls_sort)
+            out += _ix_fn(em, ix, "grp", "v", it, "i128")
+            out += _ix_fn(em, ix, "admg", "k", ct, "bool", extra=("g", "i128"))
+            classes = ", ".join("%s::%s" % (ct, ident(c)) for c in ix.classes)
+            out += ["/// The admission of group g in every class with a member there, after a write to a table it reads.",
+                    "fn ixregroup_%s(s: &mut S, g: i128) -> Result<(), StepError> {" % ix.name,
+                    "    for (c, k) in [%s].into_iter().enumerate() {" % classes,
+                    "        if s.ix_%s.has(c, g) {" % ix.name,
+                    "            let a = ixadmg_%s(s, k, g)?;" % ix.name,
+                    "            s.ix_%s.set_adm(c, g, a)?;" % ix.name, "        }", "    }", "    Ok(())", "}", ""]
         ncls = max(1, len(ix.classes))
         if "cls" in ix.eqs:
             ct = type_name(ix.cls_sort)
@@ -2365,6 +2474,17 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
         key = "ixkey_%s(s, n)?" % ix.name if "key" in ix.eqs else "0"
         if ix.within:
             key = "s.ix_%s.key_of(v)?" % ix.within
+        if "grp" in ix.eqs:
+            out += ["fn ixrefresh_%s(s: &mut S, v: u32) -> Result<(), StepError> {" % ix.name,
+                    "    let n = %s(v);" % it,
+                    "    if ixmem_%s(s, n)? {" % ix.name,
+                    "        let kc = ixcls_%s(s, n)?;" % ix.name,
+                    "        let g = ixgrp_%s(s, n)?;" % ix.name,
+                    "        let (c, k) = (ixclsno_%s(&kc), %s);" % (ix.name, key),
+                    "        let a = ixadmg_%s(s, kc, g)?;" % ix.name,
+                    "        s.ix_%s.refresh_g(v, true, c, g, k, a)" % ix.name,
+                    "    } else {", "        s.ix_%s.refresh_g(v, false, 0, 0, 0, false)" % ix.name, "    }", "}", ""]
+            continue
         out += ["fn ixrefresh_%s(s: &mut S, v: u32) -> Result<(), StepError> {" % ix.name,
                 "    let n = %s(v);" % it,
                 "    if ixmem_%s(s, n)? {" % ix.name,
@@ -2378,6 +2498,11 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
         out += ["    let d = std::mem::take(&mut s.dirty_%s);" % srt, "    let mut seen = BTreeSet::new();",
                 "    for v in d {", "        if !seen.insert(v) {", "            continue;", "        }"]
         out += ["        ixrefresh_%s(s, v)?;" % ix.name for ix in st.indexes if ix.sort == srt]
+        out += ["    }"]
+    for p in sorted(st.tables):
+        out += ["    let d = std::mem::take(&mut s.tdirty_%s);" % ident(p), "    let mut seen = BTreeSet::new();",
+                "    for g in d {", "        if !seen.insert(g) {", "            continue;", "        }"]
+        out += ["        ixregroup_%s(s, g)?;" % n for n in st.tables[p]]
         out += ["    }"]
     out += ["    Ok(())", "}", ""]
     out += ["fn stepper_init(s: &mut S) -> Result<(), StepError> {"]

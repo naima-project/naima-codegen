@@ -300,9 +300,10 @@ function _least(w: V[]): V {
 }
 
 class _Index {
-  // An index of the policy (docs/spec.md §3.7.6, §3.18.2): each member's class and order key.
-  // Order keys: the id (least), the key's value (key), minus the entry stamp (newest), the stamp (oldest).
-  ent: Map<number, [number, V]>;
+  // An index of the policy (docs/spec.md §3.7.6, §3.18.2): each member's class, order key and group.
+  // Order keys: the id (least), the key's value (key), minus the entry stamp (newest), the stamp (oldest),
+  // the order key of the index it is within (within).
+  ent: Map<number, [number, V, V]>;
   stamp: number;
 
   constructor(readonly order: number) {
@@ -317,7 +318,7 @@ class _Index {
     return c;
   }
 
-  refresh(v: number, m: boolean, c: number, k: V): void {
+  refresh(v: number, m: boolean, c: number, k: V, g: V = 0): void {
     const old = this.ent.get(v);
     if (!m) {
       this.ent.delete(v);
@@ -325,31 +326,32 @@ class _Index {
     }
     let ok: V;
     if (this.order === 0) ok = v;
-    else if (this.order === 1) ok = k;
+    else if (this.order === 1 || this.order === 4) ok = k;
     else if (old !== undefined) ok = old[1]; // a member keeps its stamp, across a change of class too
     else {
       this.stamp += 1;
       ok = this.order === 2 ? -this.stamp : this.stamp;
     }
-    this.ent.set(v, [c, ok]);
+    this.ent.set(v, [c, ok, g]);
   }
 
-  #best(adm: ((c: number) => boolean) | null): number | null {
+  // The first member whose class (and group) are admitted.
+  #best(adm: ((c: number, g: V) => boolean) | null): number | null {
     let best: [V, number] | null = null;
-    for (const [v, [c, ok]] of this.ent) {
-      if (adm !== null && !adm(c)) continue;
+    for (const [v, [c, ok, g]] of this.ent) {
+      if (adm !== null && !adm(c, g)) continue;
       if (best === null || _cmp([ok, v], best) < 0) best = [ok, v];
     }
     return best === null ? null : best[1];
   }
 
-  first(adm: ((c: number) => boolean) | null): number {
+  first(adm: ((c: number, g: V) => boolean) | null): number {
     const v = this.#best(adm);
     if (v === null) throw new Undefined("first of an index without an admitted member");
     return v;
   }
 
-  some(adm: ((c: number) => boolean) | null): boolean {
+  some(adm: ((c: number, g: V) => boolean) | null): boolean {
     return this.#best(adm) !== null;
   }
 
@@ -1115,7 +1117,7 @@ def show_sort(s) -> str:
 
 # ------------------------------------------------------------------ the module
 
-_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3}
+_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3, "within": 4}
 
 
 def _labels(model):
@@ -1460,13 +1462,16 @@ def _step(c, j) -> str:
 # ------------------------------------------------------------------ the stepper (docs/spec.md §3.8, §3.18.3)
 
 
-def _ix_fn(em: Emitter, ix, part: str, extra: str) -> list:
-    """function _ix<part>_<name>(s[, v | k]) from the index's equation in the refined Core."""
+def _ix_fn(em: Emitter, ix, part: str, extra: str, group: str | None = None) -> list:
+    """function _ix<part>_<name>(s[, v | k][, g]) from the index's equation in the refined Core;
+    group names the second argument of admits_group (the equation's ix_g)."""
     args, rhs = ix.eqs[part]
     scope = {}
     for a in args:
-        scope[a] = "s.%s" % ident(a[len("ix_p_"):]) if a.startswith("ix_p_") else extra
-    head = "function _ix%s_%s(s: V%s): V {" % (part, ix.name, ", %s: V" % extra if extra else "")
+        scope[a] = ("s.%s" % ident(a[len("ix_p_"):]) if a.startswith("ix_p_") else
+                    group if group is not None and a == "ix_g" else extra)
+    head = "function _ix%s_%s(s: V%s%s): V {" % (part, ix.name, ", %s: V" % extra if extra else "",
+                                                ", %s: V" % group if group else "")
     return ["", head, "  return %s;" % em.expr(rhs, scope), "}"]
 
 
@@ -1487,6 +1492,13 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
         adm = "(c: number) => _ixadm_%s(s, _CLS_%s[c])" % (ix.name, ix.name) if "cls" in ix.eqs else "null"
         cls = "_CLS_%s.indexOf(_ixcls_%s(s, v))" % (ix.name, ix.name) if "cls" in ix.eqs else "0"
         key = "_ixkey_%s(s, v)" % ix.name if "key" in ix.eqs else "0"
+        if ix.within:
+            key = "s._ix_%s.ent.get(v)[1]" % ix.within
+        if "grp" in ix.eqs:
+            lines += _ix_fn(em, ix, "grp", "v")
+            lines += _ix_fn(em, ix, "admg", "k", "g")
+            adm = "(c: number, g: V) => _ixadm_%s(s, _CLS_%s[c]) && _ixadmg_%s(s, _CLS_%s[c], g)" % (ix.name, ix.name, ix.name, ix.name)
+            key = "%s, _ixgrp_%s(s, v)" % (key, ix.name)
         lines += ["", "function _ixfirst_%s(s: V): number {" % ix.name, "  return s._ix_%s.first(%s);" % (ix.name, adm), "}",
                   "", "function _ixsome_%s(s: V): boolean {" % ix.name, "  return s._ix_%s.some(%s);" % (ix.name, adm), "}",
                   "", "function _ixrefresh_%s(s: V, v: number): void {" % ix.name,

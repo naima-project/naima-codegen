@@ -728,7 +728,10 @@ copied verbatim. It can therefore replace `<model>/core.mcrl2` in any system
 
 4. For an index `I` of order `within`, `within = "J"`, no parameter: `first(I)` and
    `some(I)` walk `ix_J`, the list of `J` (item 3), and stop at the first id at
-   which `I`'s membership predicate holds and its class is admitted. As `I`'s
+   which `I`'s membership predicate holds and its class (and group, §3.7.6) is
+   admitted. In every order, a member's admission is `ix_adm_<name>(k)`, and with a
+   group `ix_adm_<name>(k) && ix_admg_<name>(k, ix_grp_<name>(n))` with `k` its class:
+   the reference definitions read the group exactly as the code does. As `I`'s
    predicate has `J`'s as a conjunct (§3.7.6), every member of `I` is in `ix_J`,
    and the walk sees `I`'s members in `J`'s order. Nothing keeps a list for `I`,
    so a summand may write what `I`'s predicate reads by any operation (by a walk,
@@ -787,6 +790,29 @@ An index `[index.<name>]` declares:
   enumeration sort `K`; `admits = { var = "k", when = "<Boolean term>" }` is a
   condition on the class `k` over scalar and table parameters only (no column).
   `first(J)` is then the first member, in `J`'s order, whose class is admitted.
+- `group` and `admits_group`: optional, together, and only with `class`. `group` is
+  one column of sort `Nat` read at the member variable (`grp(n)`), the member's group;
+  `admits_group = { var = "g", when = "<Boolean term>" }` is a condition on the class
+  (the variable of `admits`, `k`) and the group `g`. It is local to its group: it reads
+  tables (function parameters over `Nat` that are not columns) applied to `g` only
+  (`occg(g)`, never `occg(g + 1)`), `k`, constructors, constants and maps; no column,
+  no scalar parameter, no quantifier. Anything else is G9. Whatever it reads then
+  changes at a known group when it changes. A member is admitted when `admits` holds
+  for its class and `admits_group` for its class and group, and `first(J)` is the
+  first member, in `J`'s order, that is admitted; `some(J)` whether there is one. This
+  admits a class by a per-group count, a one-at-a-time slot per group for example:
+  `admits = { var = "k", when = "k == KONE || occ(k) < 1" }`, `admits_group = { var =
+  "g", when = "k != KONE || occg(g) < 1" }` holds back the members of class `KONE`
+  whose group's slot is taken, and only them.
+
+  Cost. The code keeps, per (class, group) with a member, the members in `J`'s order
+  and the group's admission, and per class the fronts of its admitted (class, group)s
+  in `J`'s order (§3.10.3). `first` and `some` look at one front per admitted class:
+  `O(K · log G)`, with `K` the classes and `G` the (class, group)s with a member. A
+  refresh at one id costs `O(log F + log G)`; a write to a table that `admits_group`
+  reads, at group `g`, re-evaluates the admission of `g` in each class that has a
+  member there: `O(K · log G)`. Nothing is proportional to the number of groups or
+  of members.
 
 The membership, order and class of every index are a function of the state (and,
 for `newest` and `oldest`, of the history of that function), so `first` and `some`
@@ -850,7 +876,11 @@ new state, and the index is updated where they changed. So every condition, and 
 `first` and `some` in it, reads indexes that match the state, as the reference
 definitions of §3.7.4 do. A `newest` or `oldest` index records the entry moment as a
 stamp, a 64-bit counter of entries taken from the state (§3.10.3); an id that stays a
-member keeps its stamp, including across a change of class.
+member keeps its stamp, including across a change of class or group. A group read by
+an index counts as its class does (the column `group` reads dirties the id); a write
+to a table that an `admits_group` reads records the group it writes in a per-step
+list of dirty groups, and after the summand the admission of each dirty group is
+evaluated anew in every class that has a member in it (§3.7.6).
 
 #### 3.8.4 Simultaneous assignment
 
@@ -1063,7 +1093,9 @@ checks join them.
    `bound`, and for `newest` and `oldest` the order kept beside it as a list, as
    §3.7.4 item 3 keeps it, and for `within`
    that list of the index it is within, filtered by its predicate) and compares it with the implementation, membership,
-   order and class; and it checks that no id at or above `bound` is a member. A
+   order and class, and for an index with groups the group, the admission kept for
+   each (class, group) and `first` and `some` against their definition (§3.7.6); and it
+   checks that no id at or above `bound` is a member. A
    difference fails the test with the index, the event and the id. The Rust and
    TypeScript backends are compared with it after every event (§3.16.1), so they are
    audited through it; the TypeScript stepper's state space is also compared with the
@@ -1134,7 +1166,7 @@ in the declaration (§3.6), a list of `"<summand>: <copy | scan> <parameter>"`,
 names it; an entry that no longer happens is G8 too, so the list only shrinks. The
 manifest lists each summand's entries under `cost`.
 
-| index | `[index.<name>]` of the policy (§3.7.6) | refresh at one id, `first`, `some`: `O(log F)` amortised, times the number of classes for `first` and `some` of a classed index; `F` the number of members | per index, a membership bitset (one bit per id); per class, a `BTreeSet` of `(order key, id)`, the order key being the id (`least`), the key's value (`key`) or the stamp, reversed for `newest`; for `newest` and `oldest`, a column of `u64` stamps and a run-level counter. Entries are deleted lazily: an entry is valid while its id is a member, of that class, with that key or stamp; invalid ones are dropped when they reach the front, and the set is rebuilt from its valid entries when invalid ones outnumber them | the same with `heapq` per class and `array('Q')` stamps |
+| index | `[index.<name>]` of the policy (§3.7.6) | refresh at one id, `first`, `some`: `O(log F)` amortised, times the number of classes for `first` and `some` of a classed index; `F` the number of members | per index, a membership bitset (one bit per id); per class, a `BTreeSet` of `(order key, id)`, the order key being the id (`least`), the key's value (`key`) or the stamp, reversed for `newest`; with a group (§3.7.6), such a set per (class, group) with a member, with the group's admission, and per class the set of the fronts of its admitted (class, group)s; for `newest` and `oldest`, a column of `u64` stamps and a run-level counter. Entries are deleted lazily: an entry is valid while its id is a member, of that class, with that key or stamp; invalid ones are dropped when they reach the front, and the set is rebuilt from its valid entries when invalid ones outnumber them | the same with `heapq` per class and `array('Q')` stamps |
 | hash set | `FSet(X)`, default | `in`, insert, remove, `#`, `== {}`: `O(1)`; `+ - * <=` of two sets: `O(k)`, only on per-id sets | `HashSet` with a fixed hasher | `set` |
 | bag | `FBag(X)` | `count`, add one, remove one: `O(1)` | `HashMap<X, u32>` | `dict` |
 | stack | `List(X)` used only with `[] \|> head tail # == []` | `O(1)` | `Vec`, top at the end | `list`, top at the end |

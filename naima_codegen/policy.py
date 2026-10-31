@@ -36,6 +36,9 @@ class Index:
     adm_when: str | None = None
     within: str | None = None  # order within: the index whose order this one takes (§3.7.6)
     key_sort: str | None = None  # the sort of a key that is not a column read: Nat or Int (§3.7.6)
+    group: str | None = None  # the group: a column of sort Nat read at the member variable (§3.7.6)
+    admg_var: str | None = None  # admits_group: the group variable and the condition on (class, group)
+    admg_when: str | None = None
 
 
 @dataclass
@@ -98,9 +101,18 @@ def read_policy(text: str):
             problems.append((w, "§3.7.6", "key_sort is Nat or Int"))
         if ("class" in ix) != ("admits" in ix):
             problems.append((w, "§3.7.6", "class and admits come together"))
+        if ("group" in ix) != ("admits_group" in ix):
+            problems.append((w, "§3.7.6", "group and admits_group come together"))
+        if "group" in ix and "class" not in ix:
+            problems.append((w, "§3.7.6", "a group is given only with a class"))
         adm = ix.get("admits") or {}
+        admg = ix.get("admits_group") or {}
+        for what, a in (("admits", adm), ("admits_group", admg)):
+            if a and not (isinstance(a, dict) and "var" in a and "when" in a):
+                problems.append((w, "§3.7.6", "%s is { var = ..., when = ... }" % what))
         p.index[name] = Index(name, ix["sort"], ix["var"], ix["bound"], ix["member"], ix["order"], ix.get("key"),
-                              ix.get("class"), adm.get("var"), adm.get("when"), ix.get("within"), ix.get("key_sort"))
+                              ix.get("class"), adm.get("var"), adm.get("when"), ix.get("within"), ix.get("key_sort"),
+                              ix.get("group"), admg.get("var"), admg.get("when"))
     p.maps = d.get("maps", "")
     p.defer = dict(d.get("defer", {}))
     return p, problems
@@ -155,7 +167,7 @@ def check_policy(p: Policy, outputs: dict, params: dict, columns: set, sets: set
         w = "index.%s" % name
         if ix.sort not in ids:
             g9(w, "§3.7.6", "sort %s is not an id sort" % ix.sort)
-        for what, term in (("member", ix.member), ("class", ix.cls), ("key", ix.key)):
+        for what, term in (("member", ix.member), ("class", ix.cls), ("key", ix.key), ("group", ix.group)):
             if term is None:
                 continue
             prob = _not_local(term, ix.var, params, columns, sets)
@@ -165,6 +177,14 @@ def check_policy(p: Policy, outputs: dict, params: dict, columns: set, sets: set
             for x in idents(ix.adm_when):
                 if x in columns:
                     g9(w, "§3.7.6", "admits reads the column %s" % x)
+        if ix.group is not None:
+            m = re.fullmatch(r"\s*([A-Za-z_][\w']*)\s*\(\s*" + re.escape(ix.var) + r"\s*\)\s*", ix.group)
+            if not m or m.group(1) not in columns or params[m.group(1)].split("->", 1)[1].strip() != "Nat":
+                g9(w, "§3.7.6", "the group must be a column of sort Nat read at %s" % ix.var)
+        if ix.admg_when is not None:
+            prob = _not_group_local(ix.admg_when, ix.admg_var, params, columns)
+            if prob:
+                g9(w, "§3.7.6", "admits_group is not local to its group: %s" % prob)
         for x in idents(ix.bound):
             if x in columns:
                 g9(w, "§3.7.6", "bound reads the column %s" % x)
@@ -188,6 +208,27 @@ def check_policy(p: Policy, outputs: dict, params: dict, columns: set, sets: set
         elif not outputs[s][0]:
             g9("defer.%s" % s, "§3.7.1", "a summand without a free sum variable cannot be deferred")
     return out
+
+
+def _not_group_local(term: str, var: str, params: dict, columns: set) -> str | None:
+    """Why the condition of admits_group is not local to its group (§3.7.6), or None:
+    it reads tables (functions over Nat that are not columns) applied to the group
+    variable only, the class variable, constructors, constants and maps."""
+    for m in _IDENT.finditer(term):
+        x = m.group(0)
+        if x not in params:
+            continue
+        if x in columns:
+            return "the column %s" % x
+        if "->" not in params[x]:
+            return "the parameter %s, not a table" % x
+        if params[x].split("->", 1)[0].strip() != "Nat":
+            return "the table %s, not over Nat" % x
+        if not re.match(r"\s*\(\s*" + re.escape(var) + r"\s*\)", term[m.end():]):
+            return "the table %s read at another argument than %s" % (x, var)
+    if re.search(r"\b(exists|forall|lambda)\b", term):
+        return "a quantifier"
+    return None
 
 
 def _not_local(term: str, var: str, params: dict, columns: set, sets: set) -> str | None:

@@ -1,0 +1,2 @@
+init Core(0, lambda i: Item . 0, lambda i: Item . KANY, lambda i: Item . 0, lambda i: Item . false,
+          lambda k: Kind . 0, lambda g: Nat . 0);

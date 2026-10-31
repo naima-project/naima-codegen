@@ -268,9 +268,10 @@ function _least(w: V[]): V {
 }
 
 class _Index {
-  // An index of the policy (docs/spec.md §3.7.6, §3.18.2): each member's class and order key.
-  // Order keys: the id (least), the key's value (key), minus the entry stamp (newest), the stamp (oldest).
-  ent: Map<number, [number, V]>;
+  // An index of the policy (docs/spec.md §3.7.6, §3.18.2): each member's class, order key and group.
+  // Order keys: the id (least), the key's value (key), minus the entry stamp (newest), the stamp (oldest),
+  // the order key of the index it is within (within).
+  ent: Map<number, [number, V, V]>;
   stamp: number;
 
   constructor(readonly order: number) {
@@ -285,7 +286,7 @@ class _Index {
     return c;
   }
 
-  refresh(v: number, m: boolean, c: number, k: V): void {
+  refresh(v: number, m: boolean, c: number, k: V, g: V = 0): void {
     const old = this.ent.get(v);
     if (!m) {
       this.ent.delete(v);
@@ -293,31 +294,32 @@ class _Index {
     }
     let ok: V;
     if (this.order === 0) ok = v;
-    else if (this.order === 1) ok = k;
+    else if (this.order === 1 || this.order === 4) ok = k;
     else if (old !== undefined) ok = old[1]; // a member keeps its stamp, across a change of class too
     else {
       this.stamp += 1;
       ok = this.order === 2 ? -this.stamp : this.stamp;
     }
-    this.ent.set(v, [c, ok]);
+    this.ent.set(v, [c, ok, g]);
   }
 
-  #best(adm: ((c: number) => boolean) | null): number | null {
+  // The first member whose class (and group) are admitted.
+  #best(adm: ((c: number, g: V) => boolean) | null): number | null {
     let best: [V, number] | null = null;
-    for (const [v, [c, ok]] of this.ent) {
-      if (adm !== null && !adm(c)) continue;
+    for (const [v, [c, ok, g]] of this.ent) {
+      if (adm !== null && !adm(c, g)) continue;
       if (best === null || _cmp([ok, v], best) < 0) best = [ok, v];
     }
     return best === null ? null : best[1];
   }
 
-  first(adm: ((c: number) => boolean) | null): number {
+  first(adm: ((c: number, g: V) => boolean) | null): number {
     const v = this.#best(adm);
     if (v === null) throw new Undefined("first of an index without an admitted member");
     return v;
   }
 
-  some(adm: ((c: number) => boolean) | null): boolean {
+  some(adm: ((c: number, g: V) => boolean) | null): boolean {
     return this.#best(adm) !== null;
   }
 

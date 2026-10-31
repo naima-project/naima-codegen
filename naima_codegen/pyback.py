@@ -134,13 +134,90 @@ class _Index:
     key's value (key), minus the entry stamp (newest), the stamp (oldest), the
     order key of the index it is within (within)."""
 
-    __slots__ = ("order", "ent", "heaps", "stamp")
+    __slots__ = ("order", "ent", "heaps", "stamp", "grouped", "grp", "sub")
 
-    def __init__(self, order, ncls):
+    def __init__(self, order, ncls, grouped=False):
         self.order = order  # 0 least, 1 key, 2 newest, 3 oldest, 4 within
         self.ent = {}  # id -> (class, order key)
         self.heaps = [[] for _ in range(ncls)]
         self.stamp = 0
+        # With groups (docs/spec.md §3.7.6): a member's group; per non-empty (class, group)
+        # [heap of (order key, id), admitted, members]; heaps[c] then holds the fronts
+        # (order key, id, group) of the admitted (class, group)s of class c.
+        self.grouped = grouped
+        self.grp = {}
+        self.sub = {}
+
+    def _sfront(self, c, g):
+        e = self.sub.get((c, g))
+        if e is None:
+            return None
+        h, ent, grp = e[0], self.ent, self.grp
+        while h:
+            ok, v = h[0]
+            if ent.get(v) == (c, ok) and grp.get(v) == g:
+                return h[0]
+            heapq.heappop(h)
+        return None
+
+    def _push_top(self, c, g):
+        e = self.sub.get((c, g))
+        if e is not None and e[1]:
+            f = self._sfront(c, g)
+            if f is not None:
+                h = self.heaps[c]
+                heapq.heappush(h, (f[0], f[1], g))
+                if len(h) > 2 * len(self.sub) + 16:
+                    h[:] = [(t[0], t[1], gg) for (cc, gg), x in self.sub.items() if cc == c and x[1]
+                            for t in (self._sfront(cc, gg),) if t is not None]
+                    heapq.heapify(h)
+
+    def refresh_g(self, v, m, c, g, k, a):
+        """The index at one id after a write, with groups: member or not, its class,
+        group and key, and whether its (class, group) is admitted (§3.7.6)."""
+        old = self.ent.get(v)
+        if old is not None:
+            og = self.grp.pop(v)
+            del self.ent[v]
+            e = self.sub[(old[0], og)]
+            e[2] -= 1
+            if e[2] == 0:
+                del self.sub[(old[0], og)]
+            else:
+                self._push_top(old[0], og)
+        if not m:
+            return
+        o = self.order
+        if o == 0:
+            ok = v
+        elif o in (1, 4):
+            ok = k
+        elif old is not None:
+            ok = old[1]
+        else:
+            self.stamp += 1
+            ok = -self.stamp if o == 2 else self.stamp
+        self.ent[v] = (c, ok)
+        self.grp[v] = g
+        e = self.sub.setdefault((c, g), [[], a, 0])
+        e[1] = a
+        e[2] += 1
+        h = e[0]
+        heapq.heappush(h, (ok, v))
+        if len(h) > 2 * e[2] + 16:
+            h[:] = [(x[1], y) for y, x in self.ent.items() if x[0] == c and self.grp[y] == g]
+            heapq.heapify(h)
+        self._push_top(c, g)
+
+    def has(self, c, g):
+        return (c, g) in self.sub
+
+    def set_adm(self, c, g, a):
+        """The admission of a non-empty (class, group), after a write to a table it reads."""
+        e = self.sub.get((c, g))
+        if e is not None:
+            e[1] = a
+            self._push_top(c, g)
 
     def refresh(self, v, m, c, k):
         old = self.ent.get(v)
@@ -170,6 +247,14 @@ class _Index:
     def _front(self, c):
         h = self.heaps[c]
         ent = self.ent
+        if self.grouped:
+            while h:
+                ok, v, g = h[0]
+                e = self.sub.get((c, g))
+                if e is not None and e[1] and self._sfront(c, g) == (ok, v):
+                    return (ok, v)
+                heapq.heappop(h)
+            return None
         while h:
             ok, v = h[0]
             e = ent.get(v)
@@ -1130,20 +1215,23 @@ _ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3, "within": 4}
 
 def _stepper_slots(st) -> list:
     sorts = sorted({ix.sort for ix in st.indexes} | set(st.watched.values()))
-    return (["_d_%s" % x for x in sorts] + ["_ix_%s" % ix.name for ix in st.indexes]
+    return (["_d_%s" % x for x in sorts] + ["_t_%s" % ident(p) for p in sorted(st.tables)] + ["_ix_%s" % ix.name for ix in st.indexes]
             + ["_aud_%s" % ix.name for ix in st.indexes] + ["_audit"])
 
 
-def _ix_fn(em: Emitter, model, ix, part: str, extra: str) -> list:
-    """def _ix<part>_<name>(s[, v | k]) from the index's equation in the refined Core."""
+def _ix_fn(em: Emitter, model, ix, part: str, extra: str, group: str | None = None) -> list:
+    """def _ix<part>_<name>(s[, v | k][, g]) from the index's equation in the refined Core;
+    group names the second argument of admits_group (the equation's ix_g)."""
     args, rhs = ix.eqs[part]
     scope = {}
     for a in args:
         if a.startswith("ix_p_"):
             scope[a] = "s.%s" % ident(a[len("ix_p_"):])
+        elif group is not None and a == "ix_g":
+            scope[a] = group
         else:
             scope[a] = extra
-    head = "def _ix%s_%s(s%s):" % (part, ix.name, ", " + extra if extra else "")
+    head = "def _ix%s_%s(s%s%s):" % (part, ix.name, ", " + extra if extra else "", ", " + group if group else "")
     return ["", "", head, "    return %s" % em.expr(rhs, scope)]
 
 
@@ -1163,8 +1251,23 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
         lines += _ix_fn(em, model, ix, "bound", "")
         adm = "lambda k: _ixadm_%s(s, k)" % ix.name if "cls" in ix.eqs else "None"
         lines += ["", "", "def _ixfirst_%s(s):" % ix.name, "    return s._ix_%s.first(%s)" % (ix.name, adm),
-                  "", "", "def _ixsome_%s(s):" % ix.name, "    return s._ix_%s.some(%s)" % (ix.name, adm),
-                  "", "", "def _ixrefresh_%s(s, v):" % ix.name,
+                  "", "", "def _ixsome_%s(s):" % ix.name, "    return s._ix_%s.some(%s)" % (ix.name, adm)]
+        if "grp" in ix.eqs:
+            lines += _ix_fn(em, model, ix, "grp", "v")
+            lines += _ix_fn(em, model, ix, "admg", "k", "g")
+            key = "s._ix_%s.ent[v][1]" % ix.within if ix.within else "_ixkey_%s(s, v)" % ix.name if "key" in ix.eqs else "0"
+            lines += ["", "", "def _ixregroup_%s(s, g):" % ix.name,
+                      "    ix = s._ix_%s" % ix.name,
+                      "    for c in range(%d):" % len(ix.classes),
+                      "        if ix.has(c, g):",
+                      "            ix.set_adm(c, g, _ixadmg_%s(s, c, g))" % ix.name,
+                      "", "", "def _ixrefresh_%s(s, v):" % ix.name,
+                      "    if _ixmem_%s(s, v):" % ix.name,
+                      "        c, g = _ixcls_%s(s, v), _ixgrp_%s(s, v)" % (ix.name, ix.name),
+                      "        s._ix_%s.refresh_g(v, True, c, g, %s, _ixadmg_%s(s, c, g))" % (ix.name, key, ix.name),
+                      "    else:", "        s._ix_%s.refresh_g(v, False, 0, 0, 0, False)" % ix.name]
+            continue
+        lines += ["", "", "def _ixrefresh_%s(s, v):" % ix.name,
                   "    if _ixmem_%s(s, v):" % ix.name,
                   "        s._ix_%s.refresh(v, True, %s, %s)" % (
                       ix.name, "_ixcls_%s(s, v)" % ix.name if "cls" in ix.eqs else "0",
@@ -1179,6 +1282,10 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                   "        for v in ids:"]
         mine = [ix for ix in st.indexes if ix.sort == srt]
         lines += ["            _ixrefresh_%s(s, v)" % ix.name for ix in mine] or ["            pass"]
+    for p in sorted(st.tables):
+        lines += ["    d = s._t_%s" % ident(p), "    if d:", "        gs = list(dict.fromkeys(d))", "        d.clear()",
+                  "        for g in gs:"]
+        lines += ["            _ixregroup_%s(s, g)" % n for n in st.tables[p]]
     lines += ["    if s._audit:", "        _audit(s)"]
     lines += ["", "", "def _audit(s):", '    """Every index against its definition (docs/spec.md §3.9.9)."""']
     for ix in st.indexes:
@@ -1194,6 +1301,17 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
         if "key" in ix.eqs:
             lines += ["    for v in ref:", "        if ent[v][1] != _ixkey_%s(s, v):" % n,
                       "            raise AuditFailed('index %s: key of %%d' %% v)" % n]
+        if "grp" in ix.eqs:
+            # the group of every member, the admission of every (class, group), and first and
+            # some against their definition: the first member in index order admitted by both
+            lines += ["    ix = s._ix_%s" % n,
+                      "    for v in ref:", "        if ix.grp[v] != _ixgrp_%s(s, v):" % n,
+                      "            raise AuditFailed('index %s: group of %%d' %% v)" % n,
+                      "    for (c, g), e in ix.sub.items():", "        if e[1] != _ixadmg_%s(s, c, g):" % n,
+                      "            raise AuditFailed('index %s: admission of group %%d in class %%d' %% (g, c))" % n,
+                      "    adm = [v for v in ix.ordered() if _ixadm_%s(s, ent[v][0]) and _ixadmg_%s(s, ent[v][0], ix.grp[v])]" % (n, n),
+                      "    if ix.some(lambda k: _ixadm_%s(s, k)) != bool(adm) or (adm and _ixfirst_%s(s) != adm[0]):" % (n, n),
+                      "        raise AuditFailed('index %s: first, by definition %%r' %% adm[:1])" % n]
         if ix.order in ("newest", "oldest"):
             lines += ["    prev = s._aud_%s" % n, "    now = set(ref)",
                       "    entered = sorted(now - set(prev))",
@@ -1247,8 +1365,11 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     for p, srt in sorted(st.watched.items()):
         if p in fps:
             init.append("    s.%s.w = s._d_%s" % (ident(p), srt))
+    for p in sorted(st.tables):
+        init += ["    s._t_%s = []" % ident(p), "    s.%s.w = s._t_%s" % (ident(p), ident(p))]
     for ix in st.indexes:
-        init.append("    s._ix_%s = _Index(%d, %d)" % (ix.name, _ORDERS[ix.order], max(1, len(ix.classes))))
+        init.append("    s._ix_%s = _Index(%d, %d%s)" % (ix.name, _ORDERS[ix.order], max(1, len(ix.classes)),
+                                                       ", True" if "grp" in ix.eqs else ""))
         init.append("    s._aud_%s = []" % ix.name)
     for ix in st.indexes:
         init += ["    for v in range(_ixbound_%s(s)):" % ix.name, "        _ixrefresh_%s(s, v)" % ix.name]
