@@ -219,8 +219,9 @@ impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
                 s
             }
             None => {
+                let s = self.v.len();
                 self.v.push((i, v));
-                self.v.len() - 1
+                s
             }
         };
         self.ix.insert(i, s as u32);

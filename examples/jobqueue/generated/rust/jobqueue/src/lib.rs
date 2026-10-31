@@ -14,7 +14,8 @@
          unused_parens, clippy::all, clippy::pedantic, dead_code, unreachable_patterns, irrefutable_let_patterns,
          missing_debug_implementations, unreachable_pub)]
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::hash::{BuildHasherDefault, Hasher};
 
 /// An error of the generated code (docs/spec.md §3.14.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,19 +137,73 @@ pub trait FunKey: Ord + Clone {
 impl FunKey for i128 {}
 impl FunKey for bool {}
 
-/// A stored function: a default and the entries that differ from it, those at an id
-/// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
-/// others in a map.
+/// The hash of an id key: ids are dense small integers, so one multiplication spreads them.
+#[derive(Default)]
+pub struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(*b)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+    fn write_usize(&mut self, i: usize) {
+        self.0 = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
+
+/// A stored function: a default and the entries that differ from it. Those at an id key
+/// are a slot table (docs/spec.md §3.11.5): the values in dense slots, an id-to-slot map
+/// and the slots freed for reuse, so that an id at its default (a node never named, or
+/// dropped) occupies no slot and the table follows the ids live, not every id ever
+/// named. The others are in a map.
 #[derive(Debug, Clone)]
 pub struct Fun<K: Ord, V> {
     d: V,
     m: BTreeMap<K, V>,
-    v: Vec<V>,
+    ix: HashMap<usize, u32, BuildHasherDefault<IdHasher>>,
+    v: Vec<(usize, V)>,
+    free: Vec<u32>,
 }
 
 impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
-        Fun { d, m: BTreeMap::new(), v: Vec::new() }
+        Fun { d, m: BTreeMap::new(), ix: HashMap::default(), v: Vec::new(), free: Vec::new() }
+    }
+    /// The slot of id `i`, taken from the free list or added.
+    fn take_slot(&mut self, i: usize, v: V) -> usize {
+        let s = match self.free.pop() {
+            Some(s) => {
+                let s = s as usize;
+                if let Some(x) = self.v.get_mut(s) {
+                    *x = (i, v);
+                }
+                s
+            }
+            None => {
+                let s = self.v.len();
+                self.v.push((i, v));
+                s
+            }
+        };
+        self.ix.insert(i, s as u32);
+        s
+    }
+    /// Id `i` is at its default again: its slot is freed.
+    fn free_slot(&mut self, i: usize) {
+        if let Some(s) = self.ix.remove(&i) {
+            if let Some(x) = self.v.get_mut(s as usize) {
+                x.1 = self.d.clone();
+            }
+            self.free.push(s);
+            if self.ix.is_empty() {
+                self.v.clear();
+                self.free.clear();
+            }
+        }
     }
     pub fn from_parts(d: V, kv: Vec<(K, V)>) -> Self {
         let mut f = Fun::new(d);
@@ -164,10 +219,14 @@ impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     /// The entries that differ from the default, in key order.
     pub fn entries(&self) -> Vec<(K, &V)> {
         let mut out: Vec<(K, &V)> = self.m.iter().map(|(k, v)| (k.clone(), v)).collect();
-        for (i, x) in self.v.iter().enumerate() {
-            if *x != self.d {
-                if let Some(k) = K::undense(i) {
-                    out.push((k, x));
+        let mut ids: Vec<(usize, u32)> = self.ix.iter().map(|(i, s)| (*i, *s)).collect();
+        ids.sort_unstable();
+        for (i, s) in ids {
+            if let Some((_, x)) = self.v.get(s as usize) {
+                if *x != self.d {
+                    if let Some(k) = K::undense(i) {
+                        out.push((k, x));
+                    }
                 }
             }
         }
@@ -189,7 +248,10 @@ impl<K: FunKey, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     }
     fn get_ref(&self, k: &K) -> &V {
         match k.dense() {
-            Some(i) => self.v.get(i).unwrap_or(&self.d),
+            Some(i) => match self.ix.get(&i) {
+                Some(s) => self.v.get(*s as usize).map_or(&self.d, |x| &x.1),
+                None => &self.d,
+            },
             None => self.m.get(k).unwrap_or(&self.d),
         }
     }
@@ -199,14 +261,14 @@ impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
         match k.dense() {
             Some(i) => {
-                if i >= self.v.len() {
-                    if v == self.d {
-                        return;
+                if v == self.d {
+                    self.free_slot(i);
+                } else if let Some(s) = self.ix.get(&i).copied() {
+                    if let Some(x) = self.v.get_mut(s as usize) {
+                        x.1 = v;
                     }
-                    self.v.resize(i.saturating_add(1), self.d.clone());
-                }
-                if let Some(x) = self.v.get_mut(i) {
-                    *x = v;
+                } else {
+                    self.take_slot(i, v);
                 }
             }
             None => {
@@ -223,19 +285,37 @@ impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     }
     fn slot(&mut self, k: K) -> &mut V {
         if let Some(i) = k.dense() {
-            if i >= self.v.len() {
-                self.v.resize(i.saturating_add(1), self.d.clone());
-            }
-            if let Some(x) = self.v.get_mut(i) {
-                return x;
+            let s = match self.ix.get(&i).copied() {
+                Some(s) => s as usize,
+                None => {
+                    let d = self.d.clone();
+                    self.take_slot(i, d)
+                }
+            };
+            if let Some(x) = self.v.get_mut(s) {
+                return &mut x.1;
             }
         }
         let d = &self.d;
         self.m.entry(k).or_insert_with(|| d.clone())
     }
     fn tidy(&mut self, k: &K) {
-        if k.dense().is_none() && self.m.get(k) == Some(&self.d) {
-            self.m.remove(k);
+        match k.dense() {
+            Some(i) => {
+                let at_default = self
+                    .ix
+                    .get(&i)
+                    .and_then(|s| self.v.get(*s as usize))
+                    .is_some_and(|x| x.1 == self.d);
+                if at_default {
+                    self.free_slot(i);
+                }
+            }
+            None => {
+                if self.m.get(k) == Some(&self.d) {
+                    self.m.remove(k);
+                }
+            }
         }
     }
 }
