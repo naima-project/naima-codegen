@@ -71,10 +71,13 @@ parameter's role, every label's kind and argument names, the widths of
 integers and the observables (§3.6). With a policy, each summand of Core
 follows a tag line, `%@input` or `%@order <level>` (§3.5.4).
 
-Two complete projects, with their generated code committed:
+Three complete projects, with their generated code committed:
 [examples/jobqueue](examples/jobqueue), a job queue with a fixed number of
-workers, retries and a give-up rule, and [examples/form](examples/form), a form
-that is edited, submitted, sent and answered, made for a user interface.
+workers, retries and a give-up rule; [examples/form](examples/form), a form
+that is edited, submitted, sent and answered, made for a user interface; and
+[examples/waits](examples/waits), tasks that wait on each other, with per-task
+wait lists drained from the front, a start order ranked by lists, and a map
+keyed by records that hold lists.
 
 ## TypeScript and Svelte
 

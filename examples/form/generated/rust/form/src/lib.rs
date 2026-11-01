@@ -31,63 +31,68 @@ pub enum StepError {
 
 /// An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class an
 /// ordered set of (order key, id); the order key is the id (least), the key's
-/// value (key), minus the entry stamp (newest) or the stamp (oldest).
+/// value (key, of the key's sort), minus the entry stamp (newest) or the stamp
+/// (oldest).
 #[derive(Debug, Clone, Default)]
-pub struct Ix {
+pub struct Ix<K> {
     order: u8,
-    ent: BTreeMap<u32, (usize, i128)>,
-    sets: Vec<BTreeSet<(i128, u32)>>,
+    ent: BTreeMap<u32, (usize, K)>,
+    sets: Vec<BTreeSet<(K, u32)>>,
     stamp: i128,
 }
 
-impl Ix {
-    pub fn new(order: u8, ncls: usize) -> Ix {
+impl<K: Ord + Clone> Ix<K> {
+    pub fn new(order: u8, ncls: usize) -> Ix<K> {
         Ix { order, ent: BTreeMap::new(), sets: vec![BTreeSet::new(); ncls], stamp: 0 }
     }
 
-    /// The index at one id after a write: member or not, its class and key (§3.8.3).
-    pub fn refresh(&mut self, v: u32, m: bool, c: usize, k: i128) -> Result<(), StepError> {
-        let old = self.ent.get(&v).copied();
-        if !m {
-            if let Some((oc, ok)) = old {
-                self.ent.remove(&v);
-                if let Some(set) = self.sets.get_mut(oc) {
-                    set.remove(&(ok, v));
-                }
-            }
-            return Ok(());
-        }
-        let ok = match (self.order, old) {
-            (0, _) => i128::from(v),
-            (1, _) => k,
-            (_, Some((_, o))) => o,
-            (o, None) => {
-                self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
-                if o == 2 { self.stamp.checked_neg().ok_or(StepError::Overflow("stamp"))? } else { self.stamp }
-            }
-        };
-        if old != Some((c, ok)) {
+    /// The index at one id after a write that leaves it a member, of class c
+    /// with order key ok (§3.8.3).
+    pub fn refresh(&mut self, v: u32, c: usize, ok: K) -> Result<(), StepError> {
+        let old = self.ent.get(&v).cloned();
+        if old.as_ref() != Some(&(c, ok.clone())) {
             if let Some((oc, o)) = old {
                 if let Some(set) = self.sets.get_mut(oc) {
                     set.remove(&(o, v));
                 }
             }
-            self.ent.insert(v, (c, ok));
+            self.ent.insert(v, (c, ok.clone()));
             self.sets.get_mut(c).ok_or(StepError::Undefined("index class"))?.insert((ok, v));
         }
         Ok(())
     }
 
+    /// The index at one id after a write that leaves it no member.
+    pub fn remove(&mut self, v: u32) {
+        if let Some((oc, ok)) = self.ent.remove(&v) {
+            if let Some(set) = self.sets.get_mut(oc) {
+                set.remove(&(ok, v));
+            }
+        }
+    }
+
     /// The first (order key, id) of one class.
-    pub fn front(&self, c: usize) -> Option<(i128, u32)> {
-        self.sets.get(c).and_then(|set| set.first().copied())
+    pub fn front(&self, c: usize) -> Option<(K, u32)> {
+        self.sets.get(c).and_then(|set| set.first().cloned())
     }
 
     /// The members in index order (for tests).
     pub fn ordered(&self) -> Vec<u32> {
-        let mut all: Vec<(i128, u32)> = self.ent.iter().map(|(v, (_, o))| (*o, *v)).collect();
+        let mut all: Vec<(K, u32)> = self.ent.iter().map(|(v, (_, o))| (o.clone(), *v)).collect();
         all.sort();
         all.into_iter().map(|(_, v)| v).collect()
+    }
+}
+
+impl Ix<i128> {
+    /// The order key of a member v of an index of order newest or oldest: the stamp
+    /// it entered with, or a new one if it enters now (§3.8.3).
+    pub fn stamp(&mut self, v: u32) -> Result<i128, StepError> {
+        if let Some((_, o)) = self.ent.get(&v) {
+            return Ok(*o);
+        }
+        self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
+        if self.order == 2 { self.stamp.checked_neg().ok_or(StepError::Overflow("stamp")) } else { Ok(self.stamp) }
     }
 }
 
@@ -196,6 +201,193 @@ impl<K: Ord, V: Clone> GetSet<K, V> for Ov<'_, K, V> {
     }
 }
 
+/// A per-id growing list (docs/spec.md §3.10.3, repr adj-append): one pool of
+/// (value, next) cells shared by the ids, a free list of the cells released, and
+/// per id its first cell, last cell and length. An append, a drain (tail), head,
+/// `== []` and `#` cost O(1); a copy or a write of a whole list O(k).
+#[derive(Debug, Clone)]
+pub struct Adj<X> {
+    /// The list of an id never written.
+    d: Vec<X>,
+    val: Vec<X>,
+    next: Vec<u32>,
+    free: u32,
+    /// Per id (first cell, last cell, length), grown to the largest id written.
+    ids: Vec<Option<(u32, u32, u32)>>,
+}
+
+/// A write of a per-id growing list, applied after the summand's reads (§3.8.4).
+pub enum AdjOp<X> {
+    Set(u32, Vec<X>),
+    Push(u32, X),
+    Pop(u32),
+}
+
+impl<X> AdjOp<X> {
+    /// The id it writes.
+    pub fn id(&self) -> u32 {
+        match self {
+            AdjOp::Set(i, _) | AdjOp::Push(i, _) | AdjOp::Pop(i) => *i,
+        }
+    }
+}
+
+const ADJ_NIL: u32 = u32::MAX;
+
+/// A cell or id as an index; u32 always fits a usize where the crate builds.
+fn adj_at(c: u32) -> usize {
+    usize::try_from(c).unwrap_or(usize::MAX)
+}
+
+impl<X: Clone + PartialEq> Adj<X> {
+    pub fn new(d: Vec<X>) -> Adj<X> {
+        Adj { d, val: Vec::new(), next: Vec::new(), free: ADJ_NIL, ids: Vec::new() }
+    }
+
+    fn slot(&self, i: u32) -> Option<(u32, u32, u32)> {
+        self.ids.get(adj_at(i)).copied().flatten()
+    }
+
+    fn link(&self, c: u32) -> u32 {
+        self.next.get(adj_at(c)).copied().unwrap_or(ADJ_NIL)
+    }
+
+    fn set_link(&mut self, c: u32, n: u32) {
+        if let Some(l) = self.next.get_mut(adj_at(c)) {
+            *l = n;
+        }
+    }
+
+    /// A cell holding x, from the free list or new.
+    fn alloc(&mut self, x: X) -> Result<u32, StepError> {
+        let c = self.free;
+        if let Some(v) = self.val.get_mut(adj_at(c)) {
+            *v = x;
+            self.free = self.link(c);
+            self.set_link(c, ADJ_NIL);
+            return Ok(c);
+        }
+        let c = u32::try_from(self.val.len()).ok().filter(|c| *c != ADJ_NIL).ok_or(StepError::Overflow("pool"))?;
+        self.val.push(x);
+        self.next.push(ADJ_NIL);
+        Ok(c)
+    }
+
+    /// The cells from c on go to the free list.
+    fn release(&mut self, mut c: u32) {
+        while c != ADJ_NIL {
+            let n = self.link(c);
+            self.set_link(c, self.free);
+            self.free = c;
+            c = n;
+        }
+    }
+
+    fn put(&mut self, i: u32, s: (u32, u32, u32)) {
+        let k = adj_at(i);
+        if self.ids.len() <= k {
+            self.ids.resize(k.saturating_add(1), None);
+        }
+        if let Some(x) = self.ids.get_mut(k) {
+            *x = Some(s);
+        }
+    }
+
+    /// The slot of id i, with the default list put into the pool if i was never written.
+    fn own(&mut self, i: u32) -> Result<(u32, u32, u32), StepError> {
+        if let Some(s) = self.slot(i) {
+            return Ok(s);
+        }
+        self.put(i, (ADJ_NIL, ADJ_NIL, 0));
+        for x in self.d.clone() {
+            self.push(i, x)?;
+        }
+        Ok(self.slot(i).unwrap_or((ADJ_NIL, ADJ_NIL, 0)))
+    }
+
+    pub fn to_vec(&self, i: u32) -> Vec<X> {
+        let Some((mut c, _, _)) = self.slot(i) else { return self.d.clone() };
+        let mut out = Vec::new();
+        while let Some(x) = self.val.get(adj_at(c)) {
+            out.push(x.clone());
+            c = self.link(c);
+        }
+        out
+    }
+
+    pub fn head(&self, i: u32) -> Result<X, StepError> {
+        match self.slot(i) {
+            None => self.d.first().cloned(),
+            Some((c, _, _)) => self.val.get(adj_at(c)).cloned(),
+        }
+        .ok_or(StepError::Undefined("head"))
+    }
+
+    pub fn len(&self, i: u32) -> usize {
+        self.slot(i).map_or(self.d.len(), |(_, _, n)| adj_at(n))
+    }
+
+    pub fn is_empty(&self, i: u32) -> bool {
+        self.len(i) == 0
+    }
+
+    /// f[i -> f(i) <| x].
+    pub fn push(&mut self, i: u32, x: X) -> Result<(), StepError> {
+        let (first, last, n) = self.own(i)?;
+        let c = self.alloc(x)?;
+        let n = n.checked_add(1).ok_or(StepError::Overflow("pool"))?;
+        if last == ADJ_NIL {
+            self.put(i, (c, c, n));
+        } else {
+            self.set_link(last, c);
+            self.put(i, (first, c, n));
+        }
+        Ok(())
+    }
+
+    /// f[i -> tail(f(i))].
+    pub fn pop(&mut self, i: u32) -> Result<(), StepError> {
+        let (first, last, n) = self.own(i)?;
+        if n == 0 {
+            return Err(StepError::Undefined("tail"));
+        }
+        let next = self.link(first);
+        self.set_link(first, self.free);
+        self.free = first;
+        self.put(i, if next == ADJ_NIL { (ADJ_NIL, ADJ_NIL, 0) } else { (next, last, n.saturating_sub(1)) });
+        Ok(())
+    }
+
+    /// f[i -> l].
+    pub fn set(&mut self, i: u32, l: Vec<X>) -> Result<(), StepError> {
+        if let Some((first, _, _)) = self.slot(i) {
+            self.release(first);
+        }
+        self.put(i, (ADJ_NIL, ADJ_NIL, 0));
+        for x in l {
+            self.push(i, x)?;
+        }
+        Ok(())
+    }
+
+    pub fn apply(&mut self, op: AdjOp<X>) -> Result<(), StepError> {
+        match op {
+            AdjOp::Set(i, l) => self.set(i, l),
+            AdjOp::Push(i, x) => self.push(i, x),
+            AdjOp::Pop(i) => self.pop(i),
+        }
+    }
+
+    /// The ids whose list differs from the default, ascending, with their lists.
+    pub fn entries(&self) -> Vec<(u32, Vec<X>)> {
+        (0..self.ids.len())
+            .filter_map(|k| u32::try_from(k).ok())
+            .map(|i| (i, self.to_vec(i)))
+            .filter(|(i, l)| self.slot(*i).is_some() && *l != self.d)
+            .collect()
+    }
+}
+
 mod rt {
     use super::StepError;
     use std::collections::BTreeSet;
@@ -217,6 +409,10 @@ mod rt {
     }
     pub fn neg(a: i128) -> Result<i128, StepError> {
         a.checked_neg().ok_or(StepError::Overflow("-"))
+    }
+    /// a ∸ b: max(0, a - b) (docs/spec.md §3.2.6).
+    pub fn monus(a: i128, b: i128) -> Result<i128, StepError> {
+        Ok(sub(a, b)?.max(0))
     }
     /// A value written to a parameter fits its width (docs/spec.md §3.12.4).
     pub fn fit(v: i128, lo: i128, hi: i128, name: &'static str) -> Result<i128, StepError> {
@@ -753,7 +949,8 @@ pub fn decode(bytes: &[u8]) -> Result<Entry, DecodeError> {
     Ok(e)
 }
 
-/// The indexes refreshed at the ids the last summand wrote (docs/spec.md §3.8.3).
+/// The indexes refreshed at the ids the last summand wrote, in ascending order
+/// (docs/spec.md §3.8.3).
 fn refresh(s: &mut S) -> Result<(), StepError> {
     Ok(())
 }

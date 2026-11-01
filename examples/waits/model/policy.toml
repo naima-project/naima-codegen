@@ -1,0 +1,43 @@
+# policy.toml -- which task each output takes (docs/spec.md §3.7).
+#
+# Telling comes first, so a done task's waiters are requeued before anything starts;
+# dropping frees a label before a start can need it. Done tasks tell in the order they
+# became done, the oldest first; done tasks nobody waits on are dropped the newest
+# first; queued tasks start by rank. Two tasks done in one step (finish2) enter both
+# indexes in ascending order of id (§3.7.4).
+
+order = ["c_tell", "c_drop", "c_start"]
+
+# Done tasks with waiters, in the order they became so.
+[index.telling]
+sort = "Task"
+var = "x"
+bound = "nt"
+member = "st(x) == Done && waiters(x) != []"
+order = "oldest"
+
+# Done tasks nobody waits on, the last that became so first.
+[index.droppable]
+sort = "Task"
+var = "x"
+bound = "nt"
+member = "st(x) == Done && waiters(x) == []"
+order = "newest"
+
+# Queued tasks, by rank: [0] before [0, 2] before [1].
+[index.queue]
+sort = "Task"
+var = "x"
+bound = "nt"
+member = "st(x) == Queued"
+order = "key"
+key = "rank(x)"
+
+[select.c_tell]
+x = { term = "first(telling)", when = "some(telling)" }
+
+[select.c_drop]
+x = { term = "first(droppable)", when = "some(droppable)" }
+
+[select.c_start]
+x = { term = "first(queue)", when = "some(queue)" }

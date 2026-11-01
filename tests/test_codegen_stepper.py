@@ -254,9 +254,17 @@ class Policy(unittest.TestCase):
         codes, msgs = self._codes(lambda t: t, lambda c: c.replace("spent", "ix_spent"))
         self.assertIn("G9", codes, msgs)
 
-    def test_an_oldest_index_written_at_two_ids_is_g13(self):
+    def test_an_oldest_index_written_at_two_ids_is_accepted(self):
+        # §3.7.4 item 3: the upkeep takes every id the summand writes.
         codes, msgs = self._codes(lambda t: t, lambda c: c.replace("c_finished(j) . Core(st = st[j -> DONE],",
                                                                    "c_finished(j) . Core(st = st[j -> DONE][job(0) -> st(job(0))],"))
+        self.assertEqual(codes, [], msgs)
+
+    def test_an_oldest_index_reading_a_set_written_whole_is_g13(self):
+        codes, msgs = self._codes(
+            lambda t: t.replace('member = "st(j) == FAILED && tries(j) < retries"',
+                                'member = "st(j) == FAILED && tries(j) < retries && !(j in Q)"'),
+            lambda c: c.replace("c_start(j) . Core(Q = Q - {j},", "c_start(j) . Core(Q = Q * Q - {j},"))
         self.assertEqual(codes, ["G13"], msgs)
 
     def test_a_policy_that_blocks_where_the_model_acts_is_refused(self):

@@ -1,0 +1,92 @@
+# The interface declaration of the tasks (docs/spec.md §3.6) and its project table (§3.6.9).
+mcrl2_version = "202607.0"
+id_sorts = ["Task"]
+
+[project]
+backends = ["rust", "python", "typescript"]
+rust_crate = "waits"
+python_package = "waits"
+typescript_module = "waits"
+
+[widths]
+Nat = "u32"
+
+[[parameter]]
+name = "cap"
+role = "config"
+
+[[parameter]]
+name = "nt"
+role = "scalar"
+
+[[parameter]]
+name = "label"
+role = "column"
+
+[[parameter]]
+name = "st"
+role = "column"
+
+[[parameter]]
+name = "rank"
+role = "column"
+
+[[parameter]]
+name = "waiters"
+role = "column"
+repr = "adj-append"
+
+[[parameter]]
+name = "missing"
+role = "column"
+
+[[parameter]]
+name = "made"
+role = "map"
+
+[[parameter]]
+name = "depth"
+role = "scalar"
+
+[[action]]
+label = "c_open"
+kind = "input"
+args = ["label"]
+
+[[action]]
+label = "c_need"
+kind = "input"
+args = ["task", "on"]
+
+[[action]]
+label = "c_finish"
+kind = "input"
+args = ["task"]
+
+[[action]]
+label = "c_finish2"
+kind = "input"
+args = ["first", "second"]
+
+[[action]]
+label = "c_tell"
+kind = "output"
+args = ["waiter", "task"]
+
+[[action]]
+label = "c_drop"
+kind = "output"
+args = ["task"]
+
+[[action]]
+label = "c_start"
+kind = "output"
+args = ["task"]
+
+# The systems the refinement checks run on (§3.17).
+[systems.groups]
+small = ["two", "three"]
+
+[systems.ids.Task]
+prefix = "T"
+header = "tasks"

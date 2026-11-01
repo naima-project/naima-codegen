@@ -830,10 +830,21 @@ class Emitter:
             return "_mod(%s, %s)" % (a[0], a[1])
         if hn in ("min", "max"):
             return "Math.%s(%s, %s)" % (hn, a[0], a[1])
-        if hn == "succ":
+        if hn in ("succ", "@succ_nat", "@succ_pos"):
             return "_add(%s, 1)" % a[0]
         if hn == "pred":
             return "_sub(%s, 1)" % a[0]
+        # the rewriter's normal forms (§3.2.6)
+        if hn == "@natpred":
+            return "Math.max(0, _sub(%s, 1))" % a[0]
+        if hn == "@pospred":
+            return "Math.max(1, _sub(%s, 1))" % a[0]
+        if hn == "@monus":
+            return "Math.max(0, _sub(%s, %s))" % (a[0], a[1])
+        if hn == "@equals_zero":
+            return "(%s === 0)" % a[0]
+        if hn == "@equals_one":
+            return "(%s === 1)" % a[0]
         if hn == "abs":
             return "Math.abs(%s)" % a[0]
         if hn in ("Pos2Nat", "Nat2Int", "Pos2Int", "@cNat", "@cInt"):

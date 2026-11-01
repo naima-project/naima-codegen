@@ -629,14 +629,20 @@ def _definitions(policy: Policy, indexes: dict, least_sorts: list, ct: CoreText)
             out.append("    ix_first_%s(ix_y |> ix_l%s) = if(%s, ix_y, ix_first_%s(ix_l%s));" % (name, qa, adm, name, qa))
             out.append("    ix_some_%s([]%s) = false;" % (name, qa))
             out.append("    ix_some_%s(ix_y |> ix_l%s) = %s || ix_some_%s(ix_l%s);" % (name, qa, adm, name, qa))
-            ins = "ix_y |> ix_l" if info.order == "newest" else "ix_l <| ix_y"
-            out.append("map ix_upd_%s: %s # %s # Bool # Bool -> %s;" % (name, L, I, L))
-            out.append("    ix_rm_%s: %s # %s -> %s;" % (name, L, I, L))
-            out.append("var ix_l: %s; ix_y, ix_x: %s; ix_a, ix_b: Bool;" % (L, I))
-            out.append("eqn ix_upd_%s(ix_l, ix_y, ix_a, ix_b) = if(ix_b && !ix_a, if(ix_y in ix_l, ix_l, %s), "
-                       "if(ix_a && !ix_b, ix_rm_%s(ix_l, ix_y), ix_l));" % (name, ins, name))
-            out.append("    ix_rm_%s([], ix_y) = [];" % name)
-            out.append("    ix_rm_%s(ix_x |> ix_l, ix_y) = if(ix_x == ix_y, ix_l, ix_x |> ix_rm_%s(ix_l, ix_y));" % (name, name))
+            # The upkeep of item 3: the leaving ids out, the entering ones in, in ascending order.
+            S = "FSet(%s)" % I
+            ins = "%s(ix_i) |> ix_l" % C if info.order == "newest" else "ix_l <| %s(ix_i)" % C
+            out.append("map ix_out_%s: %s # %s -> %s;" % (name, L, S, L))
+            out.append("    ix_ins_%s: %s # %s # Nat -> %s;" % (name, L, S, L))
+            out.append("var ix_l: %s; ix_x: %s; ix_s: %s; ix_i: Nat;" % (L, I, S))
+            out.append("eqn ix_out_%s([], ix_s) = [];" % name)
+            out.append("    ix_out_%s(ix_x |> ix_l, ix_s) = if(ix_x in ix_s, ix_out_%s(ix_l, ix_s), ix_x |> ix_out_%s(ix_l, ix_s));"
+                       % (name, name, name))
+            out.append("    ix_s == {} -> ix_ins_%s(ix_l, ix_s, ix_i) = ix_l;" % name)
+            out.append("    ix_s != {} && %s(ix_i) in ix_s -> ix_ins_%s(ix_l, ix_s, ix_i) = ix_ins_%s(%s, ix_s - {%s(ix_i)}, ix_i + 1);"
+                       % (C, name, name, ins, C))
+            out.append("    ix_s != {} && !(%s(ix_i) in ix_s) -> ix_ins_%s(ix_l, ix_s, ix_i) = ix_ins_%s(ix_l, ix_s, ix_i + 1);"
+                       % (C, name, name))
             continue
         b = call("ix_bound_%s" % name, info.bound_args, [])
         ok = call("ix_ok_%s" % name, ok_args, ["%s(ix_i)" % C])
@@ -673,7 +679,9 @@ def _plain_subst(text: str, mapping: dict) -> str:
 
 
 def _upkeep(r: Src, indexes: dict, params: dict, columns: set, sets: set, g) -> None:
-    """Append the assignment keeping each newest/oldest index list (§3.7.4 item 3)."""
+    """Append the assignment keeping each newest/oldest index list (§3.7.4 item 3): the ids
+    the summand writes in what the predicate reads that leave are taken out, those that
+    enter are put in, in ascending order of id."""
     assigned = dict(r.assigns)
     for name, info in indexes.items():
         if not info.list_param:
@@ -690,18 +698,18 @@ def _upkeep(r: Src, indexes: dict, params: dict, columns: set, sets: set, g) -> 
             for y in got:
                 if norm(y) not in [norm(x) for x in ids]:
                     ids.append(y)
-        if len(ids) > 1:
-            g("G13", "summand %s" % r.name, "§3.7.4",
-              "index %s: the summand writes its membership at %d ids (%s); one at most is supported"
-              % (name, len(ids), ", ".join(norm(y) for y in ids)))
-            return
         if not ids:
             continue
-        y = ids[0]
-        old = "ix_mem_%s(%s)" % (name, ", ".join(info.mem_args + ["(%s)" % y]))
-        new = "ix_mem_%s(%s)" % (name, ", ".join(["(%s)" % assigned[p] if p in assigned else p for p in info.mem_args]
-                                                  + ["(%s)" % y]))
-        r.assigns.append((info.list_param, "ix_upd_%s(%s, %s, %s, %s)" % (name, info.list_param, "(%s)" % y, old, new)))
+        outs, ins, defs = [], [], []
+        for k, y in enumerate(ids, start=1):
+            old = "ix_mem_%s(%s)" % (name, ", ".join(info.mem_args + ["(%s)" % y]))
+            new = "ix_mem_%s(%s)" % (name, ", ".join(["(%s)" % assigned[p] if p in assigned else p for p in info.mem_args]
+                                                      + ["(%s)" % y]))
+            defs += ["ix_a%d = %s" % (k, old), "ix_b%d = %s" % (k, new)]
+            outs.append("if(ix_a%d && !ix_b%d, {%s}, {})" % (k, k, y))
+            ins.append("if(ix_b%d && !ix_a%d, {%s}, {})" % (k, k, y))
+        r.assigns.append((info.list_param, "ix_ins_%s(ix_out_%s(%s, %s), %s, 0) whr %s end"
+                          % (name, name, info.list_param, " + ".join(outs), " + ".join(ins), ", ".join(defs))))
 
 
 def _written_ids(rhs: str, p: str, is_set: bool):

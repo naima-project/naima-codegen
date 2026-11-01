@@ -1,0 +1,4 @@
+% @tasks 2
+% two: two tasks, the second may need the first.
+var k: Nat;
+eqn I_cap(@I) = 2;  I_opens(@I) = 2;  I_label(@I, k) = if(k == 0, 2, 0);  I_needs(@I) = 1;

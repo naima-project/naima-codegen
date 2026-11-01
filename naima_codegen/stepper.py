@@ -35,6 +35,7 @@ class IndexCode:
     classes: list = field(default_factory=list)  # constructors of the class sort, declaration order
     cls_sort: str | None = None
     watched: list = field(default_factory=list)  # parameters whose writes dirty an id (member, class, key)
+    key_sort: tuple | None = None  # the sort of the key of an index of order key (§3.7.6)
 
 
 @dataclass
@@ -123,6 +124,8 @@ def _indexes(lps, refined: Refined, model: Model):
                 continue
             args = [a.name for a in e.lhs.args] if isinstance(e.lhs, App) else []
             ic.eqs[part] = (args, e.rhs)
+        if "key" in ic.eqs:
+            ic.key_sort = next(m.sort[2] for m in lps.maps if m.name == "ix_key_%s" % name)
         if info.cls_sort:
             ic.cls_sort = info.cls_sort
             ic.classes = [c for c, _, _ in lps.structs[info.cls_sort].constructors]

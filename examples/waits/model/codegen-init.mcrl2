@@ -1,0 +1,4 @@
+% codegen-init.mcrl2 -- a well-typed initial state of Core (docs/spec.md §3.1.1). The
+% configuration value cap = 2 is a placeholder.
+init Core(2, 0, lambda x: Task . 0, lambda x: Task . Free, lambda x: Task . [], lambda x: Task . [],
+          lambda x: Task . 0, lambda q: Key . 0, 0);

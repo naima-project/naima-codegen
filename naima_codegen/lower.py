@@ -23,6 +23,11 @@ def g10(where: str, message: str) -> GeneratorError:
     return GeneratorError([Diagnostic("G10", CORE, where, "§3.9.1", message)])
 
 
+def g8(where: str, message: str) -> GeneratorError:
+    """An operation its representation does not provide (§3.10.4)."""
+    return GeneratorError([Diagnostic("G8", CORE, where, "§3.10.4", message)])
+
+
 @dataclass
 class Cons:
     sort: str

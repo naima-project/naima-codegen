@@ -629,7 +629,7 @@ def _ixrefresh_spent(s, v):
 def _refresh(s):
     d = s._d_Job
     if d:
-        ids = list(dict.fromkeys(d))
+        ids = sorted(set(d))
         d.clear()
         for v in ids:
             _ixrefresh_retryable(s, v)
@@ -648,8 +648,6 @@ def _audit(s):
     prev = s._aud_retryable
     now = set(ref)
     entered = sorted(now - set(prev))
-    if len(entered) > 1:
-        raise AuditFailed('index retryable: %d ids entered in one summand' % len(entered))
     keep = [v for v in prev if v in now]
     s._aud_retryable = keep + entered
     if s._ix_retryable.ordered() != s._aud_retryable:
