@@ -101,7 +101,7 @@ function _nat2pos(x: number): number {
 }
 
 function _cmp1(a: V, b: V): number {
-  if (typeof a === "string") return _RANK[a] - _RANK[b];
+  if (typeof a === "string") return _RANK[a]! - _RANK[b]!;
   if (typeof a === "boolean") return (a ? 1 : 0) - (b ? 1 : 0);
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -180,7 +180,15 @@ class _Col {
 
 class _Upd {
   // f[k -> v] over a view, read only.
-  constructor(readonly b: V, readonly k: V, readonly v: V) {}
+  readonly b: V;
+  readonly k: V;
+  readonly v: V;
+
+  constructor(b: V, k: V, v: V) {
+    this.b = b;
+    this.k = k;
+    this.v = v;
+  }
 
   get(x: V): V {
     return _eq(x, this.k) ? this.v : this.b.get(x);
@@ -189,9 +197,11 @@ class _Upd {
 
 class _Ov {
   // An overlay (docs/spec.md §3.4.8): the entries written during a call over an unchanged view.
+  readonly b: V;
   m: Map<string, V>;
 
-  constructor(readonly b: V) {
+  constructor(b: V) {
+    this.b = b;
     this.m = new Map();
   }
 
@@ -272,8 +282,10 @@ class _Index {
   // Order keys: the id (least), the key's value (key), minus the entry stamp (newest), the stamp (oldest).
   ent: Map<number, [number, V]>;
   stamp: number;
+  readonly order: number;
 
-  constructor(readonly order: number) {
+  constructor(order: number) {
+    this.order = order;
     this.ent = new Map();
     this.stamp = 0;
   }
@@ -372,7 +384,7 @@ function _dec(data: Uint8Array, pos: number, d: V): [V, number] {
     if (op[0] === "v") {
       const k = op[1][0];
       if (k === "b") {
-        if (pos >= data.length || data[pos] > 1) throw new DecodeError("a Bool");
+        if (pos >= data.length || data[pos]! > 1) throw new DecodeError("a Bool");
         vals.push(data[pos] === 1);
         pos += 1;
       } else if (k === "n" || k === "i" || k === "e") {
@@ -380,7 +392,7 @@ function _dec(data: Uint8Array, pos: number, d: V): [V, number] {
         let sh = 1;
         for (;;) {
           if (pos >= data.length || sh > 2 ** 56) throw new DecodeError("a number");
-          const b = data[pos];
+          const b = data[pos]!;
           pos += 1;
           x += (b % 128) * sh;
           sh *= 128;
@@ -544,7 +556,7 @@ function _make(type: string, args: V[], table: V): V {
 export function encode(entry: Entry): Uint8Array {
   const out: number[] = [];
   const [side, x, table] = "event" in entry ? [0, entry.event, _EV] : [1, entry.action, _ACT];
-  const c = table[x.type];
+  const c = table[x.type]!;
   out.push(side);
   _enc(c.code, ["n"], out);
   _args(x, table).forEach((v, j) => _enc(v, c.descs[j], out));
@@ -552,14 +564,14 @@ export function encode(entry: Entry): Uint8Array {
 }
 
 export function decode(data: Uint8Array): Entry {
-  if (data.length === 0 || data[0] > 1) throw new DecodeError("a side");
+  if (data.length === 0 || data[0]! > 1) throw new DecodeError("a side");
   const side = data[0];
   let [code, pos] = _dec(data, 1, ["n"]);
   const table = side === 0 ? _EV : _ACT;
   const type = (side === 0 ? _EV_BY_CODE : _ACT_BY_CODE)[code];
   if (type === undefined) throw new DecodeError("a label code");
   const args: V[] = [];
-  for (const d of table[type].descs) {
+  for (const d of table[type]!.descs) {
     let v: V;
     [v, pos] = _dec(data, pos, d);
     args.push(v);
@@ -801,7 +813,8 @@ export class Acceptor {
     if (found.length === 0) throw new Rejected(entry);
     if (found.length > 1) throw new Ambiguous(entry);
     const s = { ...this.#s };
-    found[0][0](s, found[0][1]);
+    const [fire, env] = found[0]!;
+    fire(s, env);
     this.#s = s;
   }
 
@@ -1149,7 +1162,7 @@ export const inputs: readonly InputTransition[] = [
     type: "open",
     args: [{ name: "label", sort: { kind: "int", sort: "Nat" } }],
     next(state: State, event: Event): State | null {
-      const [type, match, fire] = _INS[0];
+      const [type, match, fire] = _INS[0]!;
       if (event.type !== type) return null;
       const s = _clone(state);
       const env = match(s, _args(event, _EV));
@@ -1165,7 +1178,7 @@ export const inputs: readonly InputTransition[] = [
     type: "need",
     args: [{ name: "task", sort: { kind: "id", sort: "Task", ctor: "task" } }, { name: "on", sort: { kind: "id", sort: "Task", ctor: "task" } }],
     next(state: State, event: Event): State | null {
-      const [type, match, fire] = _INS[1];
+      const [type, match, fire] = _INS[1]!;
       if (event.type !== type) return null;
       const s = _clone(state);
       const env = match(s, _args(event, _EV));
@@ -1181,7 +1194,7 @@ export const inputs: readonly InputTransition[] = [
     type: "finish",
     args: [{ name: "task", sort: { kind: "id", sort: "Task", ctor: "task" } }],
     next(state: State, event: Event): State | null {
-      const [type, match, fire] = _INS[2];
+      const [type, match, fire] = _INS[2]!;
       if (event.type !== type) return null;
       const s = _clone(state);
       const env = match(s, _args(event, _EV));
@@ -1197,7 +1210,7 @@ export const inputs: readonly InputTransition[] = [
     type: "finish2",
     args: [{ name: "first", sort: { kind: "id", sort: "Task", ctor: "task" } }, { name: "second", sort: { kind: "id", sort: "Task", ctor: "task" } }],
     next(state: State, event: Event): State | null {
-      const [type, match, fire] = _INS[3];
+      const [type, match, fire] = _INS[3]!;
       if (event.type !== type) return null;
       const s = _clone(state);
       const env = match(s, _args(event, _EV));
@@ -1219,9 +1232,9 @@ export const outputs: readonly OutputTransition[] = [
     next(state: State) {
       const s = _clone(state);
       const out: Action[] = [];
-      if (!_OUTS[0](s, out)) return null;
+      if (!_OUTS[0]!(s, out)) return null;
       _refresh(s);
-      return { state: s, action: out[0] };
+      return { state: s, action: out[0]! };
     },
   },
   {
@@ -1232,9 +1245,9 @@ export const outputs: readonly OutputTransition[] = [
     next(state: State) {
       const s = _clone(state);
       const out: Action[] = [];
-      if (!_OUTS[1](s, out)) return null;
+      if (!_OUTS[1]!(s, out)) return null;
       _refresh(s);
-      return { state: s, action: out[0] };
+      return { state: s, action: out[0]! };
     },
   },
   {
@@ -1245,9 +1258,9 @@ export const outputs: readonly OutputTransition[] = [
     next(state: State) {
       const s = _clone(state);
       const out: Action[] = [];
-      if (!_OUTS[2](s, out)) return null;
+      if (!_OUTS[2]!(s, out)) return null;
       _refresh(s);
-      return { state: s, action: out[0] };
+      return { state: s, action: out[0]! };
     },
   },
 ];

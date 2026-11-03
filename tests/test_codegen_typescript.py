@@ -2,7 +2,9 @@
 backends against each other (§3.16), on examples/jobqueue, examples/form and
 examples/waits.
 
-- the generated modules type-check under Deno with Svelte's rune declarations;
+- the generated modules type-check under Deno with Svelte's rune declarations
+  and the strictest compiler options (erasable syntax only, index-safe), and
+  Node imports the plain module by type stripping alone;
   the plain module imports nothing and the Svelte module only the plain one;
   the Svelte module compiles with Svelte's compiler without a warning and, run
   headless, does on every event what the plain module's step does: the method
@@ -149,6 +151,14 @@ class Modules(unittest.TestCase):
             mods = [mini] + [p for n in EXAMPLES for p in (_example(n).plain, _example(n).svelte)]
             r = ts.check(*mods)
         self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-3000:])
+
+    def test_node_imports_the_plain_module_by_type_stripping(self):
+        if ts.node() is None:
+            self.skipTest("node is not installed")
+        for n in EXAMPLES:
+            r = ts.node_import(_example(n).plain)
+            self.assertEqual(r.returncode, 0, "%s: %s" % (n, r.stderr[-3000:]))
+            self.assertIn("step", r.stdout.split(), n)
 
     def test_the_plain_module_imports_nothing_and_the_svelte_module_only_it(self):
         for n in EXAMPLES:

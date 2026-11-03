@@ -43,13 +43,41 @@ def run_json(script: str, data, *args) -> str:
         return run(script, *args, p)
 
 
+# The strictest compiler options a project importing the modules may use (docs/spec.md §3.18.1): erasable syntax only,
+# so that Node's type stripping runs them, and index-safe, so that they pass noUncheckedIndexedAccess.
+STRICT = {
+    "strict": True,
+    "noUncheckedIndexedAccess": True,
+    "exactOptionalPropertyTypes": True,
+    "noImplicitOverride": True,
+    "noFallthroughCasesInSwitch": True,
+    "verbatimModuleSyntax": True,
+    "erasableSyntaxOnly": True,
+    "noPropertyAccessFromIndexSignature": True,
+}
+
+
+def node() -> str | None:
+    return shutil.which("node")
+
+
 def check(*modules: Path) -> subprocess.CompletedProcess:
-    """deno check of the modules, with Svelte's rune declarations in scope."""
+    """deno check of the modules under the STRICT compiler options, with Svelte's rune declarations in scope."""
     with tempfile.TemporaryDirectory(prefix="naima-ts-") as d:
         entry = Path(d) / "check.ts"
         entry.write_text('/// <reference types="%s" />\n' % SVELTE
                          + "".join('export * as m%d from "%s";\n' % (k, m.as_uri()) for k, m in enumerate(modules)))
-        return subprocess.run([deno(), "check", "--quiet", str(entry)], capture_output=True, text=True, timeout=900)
+        config = Path(d) / "deno.json"
+        config.write_text(json.dumps({"compilerOptions": STRICT}))
+        return subprocess.run([deno(), "check", "--quiet", "--config", str(config), str(entry)],
+                              capture_output=True, text=True, timeout=900)
+
+
+def node_import(module: Path) -> subprocess.CompletedProcess:
+    """Node importing the module by type stripping alone (no transpiler): its exported names on standard output."""
+    script = "const m = await import(%s); console.log(Object.keys(m).sort().join(' '));" % json.dumps(module.as_uri())
+    return subprocess.run([node(), "--experimental-strip-types", "--no-warnings", "--input-type=module", "-e", script],
+                          capture_output=True, text=True, timeout=300)
 
 
 def py2ts(v, s, types):

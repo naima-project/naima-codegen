@@ -1855,7 +1855,12 @@ other backends (§3.16) and checked against mCRL2 itself (§3.18.5).
 Without a policy there is no stepper, so only the plain module is written (§3.1.1).
 Both modules are ES modules that import with the `.ts` extension, as Deno and
 TypeScript's `allowImportingTsExtensions` read them; a bundler such as Vite reads
-them as they are.
+them as they are. Both use erasable syntax only (no parameter properties, enums or
+namespaces), so Node runs them by type stripping alone, and both type-check under
+`strict` with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
+`erasableSyntaxOnly`, `verbatimModuleSyntax`, `noImplicitOverride`,
+`noFallthroughCasesInSwitch` and `noPropertyAccessFromIndexSignature`, so a project
+with those options imports them as they are (T, §3.18.5).
 
 #### 3.18.2 Values
 

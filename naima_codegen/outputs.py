@@ -70,7 +70,10 @@ def build(proj, model, toolset: str, tools=None) -> dict:
         for k, v in tsback.emit(model, st, module=pj["typescript_module"]).items():
             files["typescript/%s/%s" % (pj["typescript_module"], k)] = v
     files.update(model_files)
-    costs = _whole_operations(proj, model, files["rust/%s/src/lib.rs" % proj.cfg.project["rust_crate"]])
+    # The cost check reads the Rust step code, emitted for it alone when Rust is not a chosen backend.
+    rust = (files["rust/%s/src/lib.rs" % pj["rust_crate"]] if "rust" in chosen
+            else rustback.emit(model, st)["src/lib.rs"])
+    costs = _whole_operations(proj, model, rust)
     extra = [proj.m("env.mcrl2"), proj.m("observers.mcrl2")] + sorted(
         proj.m("instances/" + p.name) for p in proj.path(proj.m("instances")).glob("*.mcrl2")) if st is not None else []
     inputs = {f: _sha(proj.path(f).read_bytes())
