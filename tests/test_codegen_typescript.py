@@ -5,7 +5,7 @@ backends against each other (§3.16), on examples/jobqueue and examples/form.
   the plain module imports nothing and the Svelte module only the plain one;
   the Svelte module compiles with Svelte's compiler without a warning and, run
   headless, does on every event what the plain module's step does: the method
-  says whether the event was accepted, the port gets the actions in order, the
+  says whether the event was accepted, the outputs get the actions in order, the
   view holds the new state and an effect reading it runs again (§3.18.4);
 - every user map of the mini fixture and of the job queue gives the value
   mCRL2's rewriter gives, on seeded random arguments (§3.4.8);
@@ -160,6 +160,17 @@ class Modules(unittest.TestCase):
             for fn in re.findall(r"(?m)^function (_m_\w+)\(", plain):
                 body = plain.split("function %s(" % fn, 1)[1].split("\nfunction ", 1)[0]
                 self.assertNotIn(fn + "(", body, fn)
+
+    def test_the_svelte_module_names_its_outputs_and_keeps_the_old_port_name(self):
+        from naima_codegen.tsback import class_name
+
+        for n in EXAMPLES:
+            e = _example(n)
+            svelte, cn = e.svelte.read_text(), class_name(e.module)
+            self.assertIn("export interface %sOutputs {" % cn, svelte, n)
+            self.assertIn("constructor(config: Config, outputs: %sOutputs) {" % cn, svelte, n)
+            self.assertRegex(svelte, r"/\*\* @deprecated [^\n]*\*/\nexport type %sPort = %sOutputs;" % (cn, cn), n)
+            self.assertNotIn("#port", svelte, n)
 
     def test_the_svelte_module_does_what_the_step_does(self):
         for n in EXAMPLES:

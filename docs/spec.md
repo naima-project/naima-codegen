@@ -1675,13 +1675,14 @@ explores.
 #### 3.18.4 The Svelte module
 
 ```ts
-export interface <Name>Port {                   // <Name>: typescript_module in camel case
+export interface <Name>Outputs {                // <Name>: typescript_module in camel case
   <output>(<args>): void;                        // one method per output label
   refused?(event: Event): void;
 }
+/** @deprecated */ export type <Name>Port = <Name>Outputs;  // the old name, for one release
 export interface <Name>View { readonly <p>: T; }  // every parameter, read only
 export class <Name> {
-  constructor(config: Config, port: <Name>Port);
+  constructor(config: Config, outputs: <Name>Outputs);
   readonly view: <Name>View;
   get stopped(): StepError | null;
   allowed(event: Event): boolean;
@@ -1693,11 +1694,14 @@ The class keeps each parameter in a `$state.raw` field of its own behind `view`,
 component that reads a parameter is updated when that parameter changes, and only
 then. It holds no logic: an input method builds the event, calls `step` of the plain
 module, and either changes nothing and returns `false` (the model does not allow the
-event now; the port's `refused` is told), or takes the new state, sets the fields that
-changed, calls the port once per action, in order, and returns `true`. The port's
-methods are where side effects happen; their results come back as calls of input
-methods. A port that calls an input method while it is being called is served after
-the actions before it, so the port sees the actions in the order the model takes them.
+event now; the outputs' `refused` is told), or takes the new state, sets the fields that
+changed, calls the outputs once per action, in order, and returns `true`. The methods
+of the outputs are where side effects happen; their results come back as calls of input
+methods. An output that calls an input method while it is being called is served after
+the actions before it, so the outputs see the actions in the order the model takes them.
+The outputs object is named after the model's output labels, as the input methods are
+after its input labels. It used to be called the port, `<Name>Port`, and that name is
+still exported for one release, deprecated, as an alias of `<Name>Outputs`.
 A `StepError` stops the machine: `stopped` holds it and every later input returns
 `false`. `allowed` is what a component enables a control with.
 
@@ -1711,7 +1715,7 @@ The tests run the modules under Deno 2 and check:
    `npm:typescript@5.9.3`, the result is compiled by `compileModule` of
    `npm:svelte@5.57.2` (a warning fails), and the compiled module is run headless next
    to the plain module on seeded random event sequences: after every event the
-   method's result says whether `step` accepted it, the port received the step's
+   method's result says whether `step` accepted it, the outputs received the step's
    actions in order, the view holds the step's state, and an effect that reads the view
    ran again exactly when the state changed.
 3. The maps against mCRL2's rewriter, and the stepper's state space against the

@@ -3,9 +3,9 @@
 //   deno run -A svelte.ts <module.svelte.ts> <sequences.json>
 //
 // Strips the types (TypeScript's transpiler), compiles the result with Svelte's compileModule (a warning
-// fails), imports it, and drives one machine per sequence through its input methods with a port that
-// records its calls, next to the plain module's `step`. Per event, the method's result must say whether
-// `step` accepted the event, the port calls must be the step's actions in order, the view must hold the
+// fails), imports it, and drives one machine per sequence through its input methods with outputs that
+// record their calls, next to the plain module's `step`. Per event, the method's result must say whether
+// `step` accepted the event, the output calls must be the step's actions in order, the view must hold the
 // step's state, an effect that reads the view must have run again exactly when the state changed, and an
 // effect that reads allowed() must hold its current value.
 // Prints "ok <events>" or the first difference.
@@ -52,10 +52,10 @@ const fail = (msg: string) => {
 };
 for (const [k, { config, events }] of seqs.entries()) {
   const calls: unknown[] = [];
-  const port = new Proxy({}, {
+  const outputs = new Proxy({}, {
     get: (_t, name) => (...args: unknown[]) => calls.push([String(name), ...args]),
   });
-  const machine = new Machine(config, port);
+  const machine = new Machine(config, outputs);
   const view = machine.view as Record<string, unknown>;
   const seen: unknown[] = [];
   const stop = W.watch(() => hex(M.stateBytes(view)), seen);
@@ -69,7 +69,7 @@ for (const [k, { config, events }] of seqs.entries()) {
       const t = M.outputs.find((o: { type: string }) => o.type === a.type);
       return [a.type === "refused" ? "refused_" : a.type, ...t.args.map((x: { name: string }) => a[x.name])];
     });
-  if (JSON.stringify(calls) !== JSON.stringify(expectCalls(r.actions))) fail(`sequence ${k}: the constructor's port calls`);
+  if (JSON.stringify(calls) !== JSON.stringify(expectCalls(r.actions))) fail(`sequence ${k}: the constructor's output calls`);
   for (const [i, e] of events.entries()) {
     calls.length = 0;
     const before = seen.length;
@@ -85,7 +85,7 @@ for (const [k, { config, events }] of seqs.entries()) {
       if (JSON.stringify(calls) !== JSON.stringify([["refused", e]])) fail(`${where}: a refusal reported as ${JSON.stringify(calls)}`);
       continue;
     }
-    if (JSON.stringify(calls) !== JSON.stringify(expectCalls(next.actions))) fail(`${where}: port calls ${JSON.stringify(calls)}`);
+    if (JSON.stringify(calls) !== JSON.stringify(expectCalls(next.actions))) fail(`${where}: output calls ${JSON.stringify(calls)}`);
     if (hex(M.stateBytes(view)) !== hex(M.stateBytes(next.state))) fail(`${where}: the view differs from the step's state`);
     const changed = hex(M.stateBytes(next.state)) !== hex(M.stateBytes(r.state));
     if (changed !== (seen.length > before)) fail(`${where}: the effect ran ${seen.length - before} times, the state ${changed ? "changed" : "did not change"}`);

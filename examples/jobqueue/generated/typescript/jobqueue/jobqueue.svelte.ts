@@ -6,8 +6,8 @@
 // To change it: change the model, verify its properties, run
 // naima-codegen generate, and commit the model and the generated directory together.
 // The model's stepper as a Svelte 5 state machine (docs/spec.md §3.18.4). Components read `view` and call
-// one method per input label; the machine calls the port for every output action, and the results of what
-// the port does come back as input methods. The logic is all in jobqueue.ts; nothing here decides anything.
+// one method per input label; the machine calls its outputs for every output action, and the results of what
+// the outputs do come back as input methods. The logic is all in jobqueue.ts; nothing here decides anything.
 import * as M from "./jobqueue.ts";
 import type { Action, Config, Event, Fn, State } from "./jobqueue.ts";
 import type { JSt, Job } from "./jobqueue.ts";
@@ -17,13 +17,16 @@ export type { JSt, Job };
 
 /** What the machine asks the outside world to do: one method per output action. Called after the
  * state has changed, in the order the model takes the actions. */
-export interface JobqueuePort {
+export interface JobqueueOutputs {
   giveUp(job: Job): void;
   retry(job: Job): void;
   start(job: Job): void;
   /** An input the model does not allow now was called; nothing changed. */
   refused?(event: Event): void;
 }
+
+/** @deprecated The old name of JobqueueOutputs, kept for one release, then removed. */
+export type JobqueuePort = JobqueueOutputs;
 
 /** The state, read only: one property per parameter of the model. */
 export interface JobqueueView {
@@ -107,14 +110,14 @@ export class Jobqueue {
   /** The state, for components: read only; it changes only through the input methods. */
   readonly view: JobqueueView;
   readonly #fields: _Fields;
-  readonly #port: JobqueuePort;
+  readonly #outputs: JobqueueOutputs;
   #state: State;
   #error: M.StepError | null;
   #queue: Action[] = [];
   #busy = false;
 
-  constructor(config: Config, port: JobqueuePort) {
-    this.#port = port;
+  constructor(config: Config, outputs: JobqueueOutputs) {
+    this.#outputs = outputs;
     const r = M.initial(config);
     // Reactive too, so that what reads allowed() or stopped is updated with the fields.
     this.#state = $state.raw(r.state);
@@ -161,7 +164,7 @@ export class Jobqueue {
       }
     }
     if (r === null) {
-      this.#port.refused?.(event);
+      this.#outputs.refused?.(event);
       return false;
     }
     this.#state = r.state;
@@ -171,7 +174,7 @@ export class Jobqueue {
   }
 
   #emit(actions: readonly Action[]): void {
-    // A port may call an input method while it is called: its actions wait for the ones before them.
+    // An output may call an input method while it is called: its actions wait for the ones before them.
     this.#queue.push(...actions);
     if (this.#busy) return;
     this.#busy = true;
@@ -179,13 +182,13 @@ export class Jobqueue {
       for (let a = this.#queue.shift(); a !== undefined; a = this.#queue.shift()) {
         switch (a.type) {
           case "giveUp":
-            this.#port.giveUp(a.job);
+            this.#outputs.giveUp(a.job);
             break;
           case "retry":
-            this.#port.retry(a.job);
+            this.#outputs.retry(a.job);
             break;
           case "start":
-            this.#port.start(a.job);
+            this.#outputs.start(a.job);
             break;
         }
       }
