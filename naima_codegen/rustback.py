@@ -25,9 +25,10 @@ import re
 from .expr import App, Bind, Num, Op, Var, Whr, show, walk
 from .frontend import INIT_PREFIX
 from .functions import is_fun, mentions
+from .sortedlists import Sorted
 from .lower import Types, g8, g10, plan_summand, width_range
 
-from .header import block as _header_block
+from .header import block as _header_block  # noqa: E402
 HEADER = _header_block("//")
 
 _KEYWORDS = {"as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if", "impl",
@@ -36,7 +37,7 @@ _KEYWORDS = {"as", "break", "const", "continue", "crate", "else", "enum", "exter
              "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual",
              "yield", "try", "gen"}
 # Type names the generated crate or the prelude uses.
-_TAKEN = {"Err", "Ok", "Option", "Some", "None", "Result", "Vec", "String", "Box", "Fun", "Ov", "Get", "GetSet",
+_TAKEN = {"Err", "Ok", "Option", "Some", "None", "Result", "Vec", "String", "Box", "Fun", "FunKey", "Ov", "Get", "GetSet",
           "StepError", "Reject", "Config", "State", "Event", "Action", "Entry", "Acceptor", "S", "BTreeMap",
           "BTreeSet", "M2"}
 
@@ -105,6 +106,11 @@ impl<K: Ord + Clone> Ix<K> {
         }
     }
 
+    /// The order key of a member (an index within this one takes it, §3.7.6).
+    pub fn key_of(&self, v: u32) -> Result<K, StepError> {
+        self.ent.get(&v).map(|e| e.1.clone()).ok_or(StepError::Undefined("index within: not a member of the outer index"))
+    }
+
     /// The first (order key, id) of one class.
     pub fn front(&self, c: usize) -> Option<(K, u32)> {
         self.sets.get(c).and_then(|set| set.first().cloned())
@@ -149,18 +155,40 @@ pub trait Get<K, V> {
 pub trait GetSet<K, V>: Get<K, V> {
     fn set(&mut self, k: K, v: V);
     fn as_get(&self) -> &dyn Get<K, V>;
+    /// The value at k, to change in place (a sorted list's insert, docs/spec.md §3.10.6).
+    fn slot(&mut self, k: K) -> &mut V;
+    /// After a change in place: the entry at k dropped when it is the default again, so that
+    /// equal functions have equal entries (docs/spec.md §3.10.7).
+    fn tidy(&mut self, _k: &K) {}
 }
 
-/// A stored function: a default and the entries that differ from it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A function's key (docs/spec.md §3.11.5): an id is held densely, by its index, any
+/// other key sparsely.
+pub trait FunKey: Ord + Clone {
+    fn dense(&self) -> Option<usize> {
+        None
+    }
+    fn undense(_i: usize) -> Option<Self> {
+        None
+    }
+}
+
+impl FunKey for i128 {}
+impl FunKey for bool {}
+
+/// A stored function: a default and the entries that differ from it, those at an id
+/// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
+/// others in a map.
+#[derive(Debug, Clone)]
 pub struct Fun<K: Ord, V> {
     d: V,
     m: BTreeMap<K, V>,
+    v: Vec<V>,
 }
 
-impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
-        Fun { d, m: BTreeMap::new() }
+        Fun { d, m: BTreeMap::new(), v: Vec::new() }
     }
     pub fn from_parts(d: V, kv: Vec<(K, V)>) -> Self {
         let mut f = Fun::new(d);
@@ -169,30 +197,86 @@ impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
         }
         f
     }
+    /// The default.
+    pub fn default_value(&self) -> &V {
+        &self.d
+    }
+    /// The entries that differ from the default, in key order.
+    pub fn entries(&self) -> Vec<(K, &V)> {
+        let mut out: Vec<(K, &V)> = self.m.iter().map(|(k, v)| (k.clone(), v)).collect();
+        for (i, x) in self.v.iter().enumerate() {
+            if *x != self.d {
+                if let Some(k) = K::undense(i) {
+                    out.push((k, x));
+                }
+            }
+        }
+        out
+    }
 }
 
-impl<K: Ord, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> PartialEq for Fun<K, V> {
+    fn eq(&self, o: &Self) -> bool {
+        self.d == o.d && self.entries() == o.entries()
+    }
+}
+
+impl<K: FunKey, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
+
+impl<K: FunKey, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     fn get(&self, k: &K) -> V {
-        match self.m.get(k) {
-            Some(v) => v.clone(),
-            None => self.d.clone(),
-        }
+        self.get_ref(k).clone()
     }
     fn get_ref(&self, k: &K) -> &V {
-        self.m.get(k).unwrap_or(&self.d)
+        match k.dense() {
+            Some(i) => self.v.get(i).unwrap_or(&self.d),
+            None => self.m.get(k).unwrap_or(&self.d),
+        }
     }
 }
 
-impl<K: Ord, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
-        if v == self.d {
-            self.m.remove(&k);
-        } else {
-            self.m.insert(k, v);
+        match k.dense() {
+            Some(i) => {
+                if i >= self.v.len() {
+                    if v == self.d {
+                        return;
+                    }
+                    self.v.resize(i.saturating_add(1), self.d.clone());
+                }
+                if let Some(x) = self.v.get_mut(i) {
+                    *x = v;
+                }
+            }
+            None => {
+                if v == self.d {
+                    self.m.remove(&k);
+                } else {
+                    self.m.insert(k, v);
+                }
+            }
         }
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
+    }
+    fn slot(&mut self, k: K) -> &mut V {
+        if let Some(i) = k.dense() {
+            if i >= self.v.len() {
+                self.v.resize(i.saturating_add(1), self.d.clone());
+            }
+            if let Some(x) = self.v.get_mut(i) {
+                return x;
+            }
+        }
+        let d = &self.d;
+        self.m.entry(k).or_insert_with(|| d.clone())
+    }
+    fn tidy(&mut self, k: &K) {
+        if k.dense().is_none() && self.m.get(k) == Some(&self.d) {
+            self.m.remove(k);
+        }
     }
 }
 
@@ -232,6 +316,10 @@ impl<K: Ord, V: Clone> GetSet<K, V> for Ov<'_, K, V> {
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
+    }
+    fn slot(&mut self, k: K) -> &mut V {
+        let b = self.b;
+        self.m.entry(k).or_insert_with_key(|k| b.get(k))
     }
 }
 
@@ -547,6 +635,46 @@ mod rt {
     pub fn least<X: Ord + Clone>(s: &BTreeSet<X>) -> Result<X, StepError> {
         s.first().cloned().ok_or(StepError::Undefined("least of an empty set"))
     }
+    /// An ordered insert into a list sorted by id (docs/spec.md §3.10.6): the
+    /// model's walk, at the place a binary search finds.
+    pub fn ins_sorted<X: Ord>(l: &mut Vec<X>, u: X) {
+        if let Err(p) = l.binary_search(&u) {
+            l.insert(p, u);
+        }
+    }
+    /// An insert ordered by a key, into a list kept sorted by that key (docs/spec.md
+    /// §3.10.7): the model's walk puts u before the first element whose key is greater,
+    /// the place a binary search finds.
+    pub fn ins_by_key<X, K: Ord>(l: &mut Vec<X>, u: X, key: impl Fn(&X) -> K) {
+        let ku = key(&u);
+        let p = l.partition_point(|x| key(x) <= ku);
+        l.insert(p, u);
+    }
+    /// tail of a list entry, in place.
+    pub fn pop_first<X>(l: &mut Vec<X>) -> Result<(), StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        l.remove(0);
+        Ok(())
+    }
+    /// The removal of u's first occurrence, in place.
+    pub fn rem_first<X: PartialEq>(l: &mut Vec<X>, u: &X) {
+        if let Some(p) = l.iter().position(|x| x == u) {
+            l.remove(p);
+        }
+    }
+    /// tail(l) == [], read in place.
+    pub fn tail_empty<X>(l: &[X]) -> Result<bool, StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        Ok(l.len() == 1)
+    }
+    /// l with u's first occurrence removed == [], read in place.
+    pub fn rem_empty<X: PartialEq>(l: &[X], u: &X) -> bool {
+        l.is_empty() || (l.len() == 1 && l.first() == Some(u))
+    }
 }
 
 /// A malformed entry (docs/spec.md §3.14.2).
@@ -697,6 +825,10 @@ publish.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# The firing hook (docs/spec.md §3.11.6): the output loop posts each fire's summand.
+firing = []
+
 [lints]
 workspace = true
 """
@@ -709,7 +841,39 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+# The firing hook (docs/spec.md §3.11.6): the output loop posts each fire's summand.
+firing = []
 """
+
+
+def _rust_str(t: str) -> str:
+    """A Rust string literal for `t`."""
+    return '"%s"' % t.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def firing_hook(labels: list) -> list:
+    """The firing hook (§3.11.6): the output summands' labels in policy order, the
+    slot the output loop posts into before each fire under the feature `firing`,
+    and its reader."""
+    return ["/// The output summands' labels, in policy order (docs/spec.md §3.11.6).",
+            "pub const OUTPUT_LABELS: [&str; %d] = [%s];" % (len(labels), ", ".join(_rust_str(l) for l in labels)), "",
+            "/// The index plus one, in [`OUTPUT_LABELS`], of the output summand fired last; 0:",
+            "/// none (docs/spec.md §3.11.6). Process-wide; written only with the feature `firing`.",
+            "#[cfg(feature = \"firing\")]",
+            "pub static FIRING: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);", "",
+            "/// The label of the output summand fired last, read from any thread; `None`",
+            "/// without the feature `firing` or before the first fire (docs/spec.md §3.11.6).",
+            "pub fn firing() -> Option<&'static str> {",
+            "    #[cfg(feature = \"firing\")]",
+            "    {",
+            "        let i = FIRING.load(core::sync::atomic::Ordering::Relaxed);",
+            "        return usize::try_from(i).ok().and_then(|i| i.checked_sub(1)).and_then(|i| OUTPUT_LABELS.get(i)).copied();",
+            "    }",
+            "    #[cfg(not(feature = \"firing\"))]",
+            "    None",
+            "}", ""]
 
 
 def cargo_toml(package: str, workspace: bool) -> str:
@@ -731,8 +895,8 @@ def type_name(sort_name: str) -> str:
 
 
 def _borrowed(code: str) -> str:
-    """A parameter read without its clone, where a reference serves."""
-    m = re.fullmatch(r"(s\.[A-Za-z_][A-Za-z0-9_]*)\.clone\(\)", code)
+    """A parameter or variable read without its clone, where a reference serves."""
+    m = re.fullmatch(r"((?:s\.)?[A-Za-z_][A-Za-z0-9_]*)\.clone\(\)", code)
     return m.group(1) if m else code
 
 
@@ -756,8 +920,12 @@ class Emitter:
         self.n = 0
         # occurrences of a variable whose value is moved, not cloned: {id(Var): code} (see takes)
         self.moves = {}
-        # set differences whose right operand is evaluated before the left one is moved: {id(App)}
-        self.hoists = set()
+        # set and list arguments passed by reference: {map: positions} (see borrowable)
+        self.borrows = {}
+        # applications whose operands after the moved one are evaluated first: {id(App): moved position}
+        self.hoists = {}
+        # sorted per-id lists (docs/spec.md §3.10.6), set by emit
+        self.sorted = Sorted([model.lps], {}, {}, ())
 
     def fresh(self, base: str) -> str:
         self.n += 1
@@ -828,10 +996,15 @@ class Emitter:
             shape = t.shape[name]
             if shape == "id":
                 lines += [derive + ", Default, Copy)]", "pub struct %s(pub u32);" % tn, "",
+                          "impl FunKey for %s {" % tn, "    fn dense(&self) -> Option<usize> {",
+                          "        usize::try_from(self.0).ok()", "    }",
+                          "    fn undense(i: usize) -> Option<Self> {", "        u32::try_from(i).ok().map(%s)" % tn,
+                          "    }", "}", "",
                           "impl M2 for %s {" % tn, "    fn m2(&self, out: &mut String) {",
                           '        out.push_str("%s(");' % st.constructors[0][0],
                           "        out.push_str(&self.0.to_string());", "        out.push(')');", "    }", "}", ""]
             elif shape == "enumeration":
+                lines += ["impl FunKey for %s {}" % tn, ""]
                 lines += [derive + ", Default, Copy)]", "pub enum %s {" % tn]
                 for k, (c, _, _) in enumerate(st.constructors):
                     lines.append("    %s%s," % ("#[default]\n    " if k == 0 else "", ident(c)))
@@ -841,6 +1014,7 @@ class Emitter:
                 lines += ["        });", "    }", "}", ""]
             elif shape == "record":
                 c, fields, _ = st.constructors[0]
+                lines += ["impl FunKey for %s {}" % tn, ""]
                 lines += [derive + ", Default)]", "pub struct %s {" % tn]
                 lines += ["    pub %s: %s," % (self.field(name, 0, j), self.rtype(fs)) for j, (_, fs) in enumerate(fields)]
                 lines += ["}", "", "impl M2 for %s {" % tn, "    fn m2(&self, out: &mut String) {",
@@ -851,6 +1025,7 @@ class Emitter:
                     lines.append("        self.%s.m2(out);" % self.field(name, 0, j))
                 lines += ["        out.push(')');", "    }", "}", ""]
             else:
+                lines += ["impl FunKey for %s {}" % tn, ""]
                 lines += [derive + ")]", "pub enum %s {" % tn]
                 for c, fields, _ in st.constructors:
                     lines.append("    %s%s," % (ident(c), "(%s)" % ", ".join(self.rtype(fs) for _, fs in fields) if fields else ""))
@@ -1017,6 +1192,14 @@ class Emitter:
                 f = self.view_ref(x.args[0].head, scope)
                 out.append("rt::head_ref((%s).get_ref(&%s))?" % (f, self.expr(x.args[0].args[0], scope)))
                 continue
+            if hn in ("==", "!=") and len(x.args) == 2 and self._empty_read(x) is not None:
+                # F(y), tail(F(y)) or r(F(y), u) == [] (§3.10.7): the entry read in place, not copied
+                kind, rd, u = self._empty_read(x)
+                f = "(%s).get_ref(&%s)" % (self.view_ref(rd.head, scope), self.expr(rd.args[0], scope))
+                t = "rt::tail_empty(%s)?" % f if kind == "tail" else "%s.is_empty()" % f if kind == "self" \
+                    else "rt::rem_empty(%s, &%s)" % (f, self.expr(u, scope))
+                out.append(t if hn == "==" else "!%s" % t)
+                continue
             if not isinstance(h, Op):  # a read F(x)
                 f = self.view_ref(h, scope)
                 out.append("(%s).get(&%s)" % (f, self.expr(x.args[0], scope)))
@@ -1038,7 +1221,10 @@ class Emitter:
                 out.append("rt::dq_head(&s.%s)?" % ident(x.args[0].name))
                 continue
             if hn in self.fun_maps or hn in self.walks or hn in self.model_maps():
-                out.append(self.call(x, scope) + "?")
+                if id(x) in self.hoists:
+                    out.append("{ %s }" % (self.call(x, scope) + "?"))
+                else:
+                    out.append(self.call(x, scope) + "?")
                 continue
             if hn in self.types.proj and self.types.proj[hn][0][0].shape == "union":
                 out.append("proj_%s(&%s)?" % (ident(hn), self.expr(x.args[0], scope)))
@@ -1052,8 +1238,8 @@ class Emitter:
             args = out[len(out) - n:]
             del out[len(out) - n:]
             if id(x) in self.hoists:
-                h = self.fresh("h")
-                out.append("{ let %s = %s; %s }" % (h, args[1], self._app(x, hn, [args[0], h])))
+                lets, args = self.hoisted(x, args, self.owned(x)[0])
+                out.append("{ %s%s }" % (lets, self._app(x, hn, args)))
                 continue
             out.append(self._app(x, hn, args))
         return out[-1]
@@ -1180,7 +1366,7 @@ class Emitter:
         if x.kind in ("Exists", "Forall") and len(x.vars) == 1:
             v = x.vars[0].name
             mem, rest = x.body.args[0], x.body.args[1]
-            col = self.expr(mem.args[1], scope)
+            col = "(%s).iter().cloned()" % _borrowed(self.expr(mem.args[1], scope))
             name = self.fresh("q_")
             inner = dict(scope)
             inner[v] = (name, "val")
@@ -1222,9 +1408,9 @@ class Emitter:
         if hn in ("<", "<=", ">", ">=") and len(a) == 2:
             if k0 == "FSet":
                 if hn == "<=":
-                    return "(%s).is_subset(&%s)" % (a[0], a[1])
+                    return "(%s).is_subset(&%s)" % (_borrowed(a[0]), _borrowed(a[1]))
                 if hn == ">=":
-                    return "(%s).is_superset(&%s)" % (a[0], a[1])
+                    return "(%s).is_superset(&%s)" % (_borrowed(a[0]), _borrowed(a[1]))
                 raise g10("operator %s" % hn, "strict set inclusion")
             return "(%s %s %s)" % (a[0], hn, a[1])
         if hn == "=>":
@@ -1283,7 +1469,7 @@ class Emitter:
         if hn in ("head", "tail", "rhead", "rtail"):
             return "rt::%s(%s)?" % (hn, a[0])
         if hn == "#":
-            return "rt::count((%s).len())?" % a[0]
+            return "rt::count((%s).len())?" % _borrowed(a[0])
         if hn == ".":
             return "rt::at(%s, %s)?" % (a[0], a[1])
         if hn == "in":
@@ -1306,16 +1492,114 @@ class Emitter:
             return [0, 1], ({0} if hn == "-" else {0, 1})
         if hn in ("@fset_cons", "@fset_insert") and n == 2:
             return [1, 0], {1}
+        if hn == "|>" and n == 2:
+            return [0, 1], {1}
+        if hn in ("<|", "++") and n == 2:
+            return [0, 1], ({0} if hn == "<|" else {0, 1})
+        if hn in ("tail", "rtail") and n == 1:
+            return [0], {0}
         if hn in self.fun_maps or hn in self.walks or hn in self.model_maps():
-            return list(range(n)), {j for j in range(n) if j < len(dom) and not is_fun(self.lps, dom[j])}
+            return list(range(n)), {j for j in range(n) if j < len(dom) and not is_fun(self.lps, dom[j])
+                                    and j not in self.borrows.get(hn, ())}
         return None
 
-    def takes(self, e, name: str, code: str) -> dict:
+    def borrowable(self, maps: dict) -> dict:
+        """{map: positions}: the set and list arguments a user map only reads, passed by
+        reference instead of by value (docs/spec.md §3.8.4). A position qualifies
+        when every occurrence of its variable is read in place (`in`, `#`, `== {}`,
+        `least`, `head`, `<=`, a quantifier's range), passed at a qualifying position
+        of a map (the greatest fixpoint), or, in a walk, passed on unchanged; the list
+        a walk walks always qualifies. maps: name -> (Map, equations)."""
+        cand = {}
+        for name, (m, eqs) in maps.items():
+            dom = m.sort[1] if m.sort[0] == "->" else ()
+            w = self.walks.get(name)
+            js = set()
+            for j, srt in enumerate(dom):
+                if self.types.kind(srt) not in ("FSet", "List"):
+                    continue
+                if w is None and j == 0 and len(eqs) > 1:
+                    continue  # matched by constructor
+                js.add(j)
+            cand[name] = js
+        changed = True
+        while changed:
+            changed = False
+            for name, (m, eqs) in maps.items():
+                w = self.walks.get(name)
+                for j in sorted(cand[name]):
+                    if w is not None:
+                        if j == w.pos:
+                            continue
+                        uses = [(w.params[j], w.base), (w.params[j], w.body)]
+                    else:
+                        uses = [(e.lhs.args[j].name, e.rhs) for e in eqs
+                                if isinstance(e.lhs, App) and j < len(e.lhs.args) and isinstance(e.lhs.args[j], Var)]
+                    if not all(self._reads_only(e, v, name, j, cand) for v, e in uses):
+                        cand[name].discard(j)
+                        changed = True
+        return {k: v for k, v in cand.items() if v}
+
+    def _reads_only(self, e, v: str, me: str, j: int, cand: dict) -> bool:
+        """Whether every occurrence of variable v in e is a read in place (see borrowable)."""
+        stack = [(e, None, None)]
+        while stack:
+            x, parent, k = stack.pop()
+            if isinstance(x, Var):
+                if x.name != v:
+                    continue
+                if parent is None:
+                    return False
+                hn = parent.head.name if isinstance(parent.head, Op) else None
+                if hn == "in" and k == 1 or hn in ("#", "head", "<=", ">=") or (hn or "").startswith("ix_least_"):
+                    continue
+                if hn in ("==", "!=") and isinstance(parent.args[1 - k], Op) \
+                        and parent.args[1 - k].name in ("{}", "[]", "@fset_empty"):
+                    continue
+                if hn == me and k == j:
+                    continue  # a walk passing it on unchanged
+                if hn in cand and k in cand[hn] and hn != me:
+                    continue
+                return False
+            if isinstance(x, App):
+                for k2, a in enumerate(x.args):
+                    stack.append((a, x, k2))
+            elif isinstance(x, Bind):
+                stack.append((x.body, None, None))
+            elif isinstance(x, Whr):
+                stack.append((x.body, None, None))
+                for _, d in x.defs:
+                    stack.append((d, None, None))
+        return True
+
+    def _reach(self, e, name: str) -> bool:
+        """Whether some occurrence of `name` in e lies on a path of `if` branches and
+        consumed operands (`owned`): a place its value could be moved from."""
+        stack = [e]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, Var):
+                if x.name == name:
+                    return True
+                continue
+            if not isinstance(x, App) or not isinstance(x.head, Op):
+                continue
+            if x.head.name == "if" and len(x.args) == 3:
+                stack += [x.args[1], x.args[2]]
+                continue
+            o = self.owned(x)
+            if o is not None:
+                stack += [x.args[j] for j in o[1] if _occurs(x.args[j], name)]
+        return False
+
+    def takes(self, e, name: str, code: str, hoist: bool = True) -> dict:
         """The occurrences of variable `name` in e whose value can be moved (`code`)
         instead of cloned, as {id(occurrence): code}: those on a path of `if` branches
         and consumed operands (`owned`) along which nothing reads `name` after the move.
         Reads elsewhere stay reads (a condition is evaluated before its branches, an
-        operand before the consumed one); at most one move happens on any path."""
+        operand before the consumed one); an operand after the consumed one that reads
+        `name` is evaluated first (hoisted, `self.hoists`) when `hoist`. At most one move
+        happens on any path."""
         marked = {}
         stack = [e]
         while stack:
@@ -1334,18 +1618,35 @@ class Emitter:
                 continue
             order, owned = o
             hits = [j for j in order if _occurs(x.args[j], name)]
-            if hits and hits[-1] in owned:
-                stack.append(x.args[hits[-1]])
-            elif hits == [0, 1] and owned == {0}:
-                # S - f(S): the operand that reads S is evaluated first (hoisted)
-                self.hoists.add(id(x))
-                stack.append(x.args[0])
+            cand = [j for j in hits if j in owned and self._reach(x.args[j], name)]
+            if not cand:
+                continue
+            f = cand[-1]
+            if hits[-1] != f:
+                if not hoist or id(x) in self.hoists:
+                    continue
+                self.hoists[id(x)] = f
+            stack.append(x.args[f])
         # a subexpression shared by two paths is moved only if every path to it moves
         total = {}
         for x in walk(e):
             if isinstance(x, Var) and id(x) in marked:
                 total[id(x)] = total.get(id(x), 0) + 1
         return {k: code for k, c in marked.items() if total[k] == c}
+
+    def hoisted(self, x, args: list, order: list) -> tuple:
+        """For an application whose consumed operand is moved (`takes`): the operands
+        evaluated after it in `order`, bound first, as (lets, args)."""
+        f = self.hoists.get(id(x))
+        if f is None:
+            return "", args
+        args = list(args)
+        lets = []
+        for j in order[order.index(f) + 1:]:
+            h = self.fresh("h")
+            lets.append("let %s = %s; " % (h, args[j]))
+            args[j] = h
+        return "".join(lets), args
 
     # -------------------------------------------------------------- views
 
@@ -1379,6 +1680,27 @@ class Emitter:
         code, kind = self.view(e, scope)
         return "Ov::over(%s)" % code if kind == "ref" else code
 
+    def _empty_read(self, x):
+        """For `F(y) == []`, `tail(F(y)) == []` or `r(F(y), u) == []` (r a first-occurrence
+        removal, §3.10.7), F a function read of a list: (kind, the read F(y), u); else None."""
+        for a, b in ((x.args[0], x.args[1]), (x.args[1], x.args[0])):
+            if not (isinstance(b, Op) and b.name == "[]") or not isinstance(a, App):
+                continue
+            if not isinstance(a.head, Op):
+                if len(a.args) == 1 and not is_fun(self.lps, self._sort_of(a)) \
+                        and self.types.kind(self._sort_of(a)) == "List":
+                    return ("self", a, None)
+                continue
+            rd = a.args[0] if a.args else None
+            if not (isinstance(rd, App) and not isinstance(rd.head, Op) and len(rd.args) == 1) \
+                    or is_fun(self.lps, self._sort_of(rd)):
+                continue
+            if a.head.name == "tail" and len(a.args) == 1:
+                return ("tail", rd, None)
+            if a.head.name in self.sorted.removes and len(a.args) == 2:
+                return ("rem", rd, a.args[1])
+        return None
+
     def view_ref(self, e, scope) -> str:
         code, kind = self.view(e, scope)
         return code if kind == "ref" else "&%s" % code
@@ -1404,9 +1726,14 @@ class Emitter:
                     args.append("&mut %s" % self.view_ov(a, scope))
                 else:
                     args.append(self.view_ref(a, scope))
+            elif j in self.borrows.get(name, ()):
+                code = self.expr(a, scope)
+                b = _borrowed(code)
+                args.append("&%s" % b if b != code else "&(%s)" % code)
             else:
                 args.append(self.expr(a, scope))
-        return "m_%s(%s)" % (ident(name), ", ".join(args))
+        lets, args = self.hoisted(x, args, list(range(len(args))))
+        return "%sm_%s(%s)" % (lets, ident(name), ", ".join(args))
 
     def apply_fe(self, fe, target: str, scope: dict, lines: list, ind: str):
         """Statements that apply a function expression to `target` (an overlay whose
@@ -1436,10 +1763,12 @@ class Emitter:
             else:
                 raise g10("function expression %s" % show(x)[:80], "no Rust for it")
 
-    def collect_writes(self, fe, wvar: str, scope: dict, lines: list, ind: str):
+    def collect_writes(self, fe, wvar: str, scope: dict, lines: list, ind: str, acc: str | None = None):
         """Statements that push onto `wvar` the writes of a function expression, every
         index, value and condition evaluated before any is applied (inside a walk,
-        where the leaves read the accumulator itself)."""
+        where the leaves read the accumulator itself). With `acc`, the walk's sorted
+        parameter (docs/spec.md §3.10.6): its ordered inserts are pushed onto `wvar`i
+        as (key, id), to apply in place."""
         stack = [("fe", fe, ind)]
         while stack:
             kind, x, i = stack.pop()
@@ -1449,7 +1778,14 @@ class Emitter:
             if isinstance(x, Var):
                 continue
             h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
-            if h == "@func_update":
+            up = self.sorted.update_value(x.args[2], x.args[1], acc) \
+                if acc is not None and h == "@func_update" and isinstance(x.args[0], Var) and x.args[0].name == acc else None
+            if up is not None and up[0] == "ins":
+                stack.append(("line", "%si.push((%s, %s));" % (wvar, self.expr(x.args[1], scope), self.expr(up[1], scope)), i))
+            elif up is not None:
+                stack.append(("line", "{ let k = %s; for x in %s { %si.push((k.clone(), x)); } }"
+                              % (self.expr(x.args[1], scope), self.expr(up[1], scope), wvar), i))
+            elif h == "@func_update":
                 stack.append(("line", "%s.push((%s, %s));" % (wvar, self.expr(x.args[1], scope), self.expr(x.args[2], scope)), i))
                 stack.append(("fe", x.args[0], i))
             elif h == "if":
@@ -1468,6 +1804,8 @@ class Emitter:
         if is_fun(self.lps, s):
             k, v = self.kv(s)
             return ("&mut dyn GetSet<%s, %s>" if j in self.written(m.name) else "&dyn Get<%s, %s>") % (k, v)
+        if j in self.borrows.get(m.name, ()):
+            return "&" + self.rtype(s)
         return self.rtype(s)
 
     def ret_type(self, m) -> str:
@@ -1475,6 +1813,7 @@ class Emitter:
         return "()" if is_fun(self.lps, r) else self.rtype(r)
 
     def emit_map(self, m, eqs) -> list:
+        self._cur = m.name
         if m.name in self.walks:
             return self.emit_walk(m, self.walks[m.name])
         name = m.name
@@ -1523,10 +1862,10 @@ class Emitter:
             # a set or list argument is the callee's own: moved into the result, not cloned
             for j, p in enumerate(lhs_args):
                 if isinstance(p, Var) and scope.get(p.name) == ("a%d" % j, "val") \
-                        and self.types.kind(p.sort) in ("FSet", "List"):
+                        and self.types.kind(p.sort) in ("FSet", "List") and j not in self.borrows.get(self._cur, ()):
                     self.moves.update(self.takes(rhs, p.name, "a%d" % j))
             code = self.expr(rhs, scope)
-            self.moves, self.hoists = {}, set()
+            self.moves, self.hoists = {}, {}
             return [ind + "Ok(%s)" % code]
         target = "a%d" % ret
         lines = [ind + "let mut w: Vec<_> = Vec::new();"]
@@ -1547,6 +1886,9 @@ class Emitter:
             if is_fun(self.lps, m.sort[1][j]):
                 lines.append("    let %s = a%d;" % (v, j))
                 scope[p] = (v, "mut" if j in self.written(m.name) else "ref")
+            elif j in self.borrows.get(m.name, ()):
+                lines.append("    let %s = a%d;" % (v, j))
+                scope[p] = (v, "val")
             else:
                 lines.append("    let mut %s = a%d;" % (v, j))
                 scope[p] = (v, "val")
@@ -1632,7 +1974,8 @@ class Emitter:
         """Moves of the walk's set and list parameters (`params`) out of x (see takes)."""
         out = {}
         for j, p in enumerate(w.params):
-            if p in params and j != w.pos and self.types.kind(m.sort[1][j]) in ("FSet", "List"):
+            if p in params and j != w.pos and self.types.kind(m.sort[1][j]) in ("FSet", "List") \
+                    and j not in self.borrows.get(m.name, ()):
                 out.update(self.takes(x, p, "std::mem::take(&mut v_%s)" % ident(p)))
         return out
 
@@ -1641,13 +1984,18 @@ class Emitter:
             # the loop ends here: every parameter is moved out, not cloned
             self.moves = self._walk_moves(m, w, x, set(w.params)) if m is not None else {}
             code = self.expr(x, self._vals(scope))
-            self.moves, self.hoists = {}, set()
+            self.moves, self.hoists = {}, {}
             return [ind + "break %s;" % code]
         target = "v_" + ident(w.params[w.ret_pos])
+        acc = w.params[w.ret_pos] if m is not None and self.sorted.walks.get(m.name) == w.ret_pos else None
         lines = [ind + "let mut wr: Vec<_> = Vec::new();"]
-        self.collect_writes(x, "wr", self._vals(scope), lines, ind)
-        lines += [ind + "for (k, v) in wr {", ind + "    %s.set(k, v);" % target, ind + "}", ind + "break ();"]
-        return lines
+        if acc is not None:
+            lines.append(ind + "let mut wri: Vec<_> = Vec::new();")
+        self.collect_writes(x, "wr", self._vals(scope), lines, ind, acc)
+        lines += [ind + "for (k, v) in wr {", ind + "    %s.set(k, v);" % target, ind + "}"]
+        if acc is not None:
+            lines += [ind + "for (k, u) in wri {", ind + "    rt::ins_sorted(%s.slot(k), u);" % target, ind + "}"]
+        return lines + [ind + "break ();"]
 
     @staticmethod
     def _vals(scope: dict) -> dict:
@@ -1667,26 +2015,73 @@ class Emitter:
                 self.moves = self._walk_moves(m, w, a, {p})
             if is_fun(self.lps, m.sort[1][j]):
                 wv = self.fresh("wc")
+                acc = p if self.sorted.walks.get(m.name) == j else None
                 lines.append(ind + "let mut %s: Vec<_> = Vec::new();" % wv)
-                self.collect_writes(a, wv, scope, lines, ind)
-                writes.append(("v_" + ident(p), wv))
+                if acc is not None:
+                    lines.append(ind + "let mut %si: Vec<_> = Vec::new();" % wv)
+                self.collect_writes(a, wv, scope, lines, ind, acc)
+                writes.append(("v_" + ident(p), wv, acc is not None))
             else:
                 t = self.fresh("t")
                 lines.append(ind + "let %s = %s;" % (t, self.expr(a, scope)))
                 temps.append(("v_" + ident(p), t))
-            self.moves, self.hoists = {}, set()
-        for v, wv in writes:
+            self.moves, self.hoists = {}, {}
+        for v, wv, ins in writes:
             lines += [ind + "for (k, v) in %s {" % wv, ind + "    %s.set(k, v);" % v, ind + "}"]
+            if ins:
+                lines += [ind + "for (k, u) in %si {" % wv, ind + "    rt::ins_sorted(%s.slot(k), u);" % v, ind + "}"]
         for v, t in temps:
             lines.append(ind + "%s = %s;" % (v, t))
         lines += [ind + "i = i.saturating_add(1);", ind + "continue;"]
         return lines
 
 
+_WHOLE = (("copy", r"\bs\.(\w+)\.clone\(\)"), ("copy", r"Vec::from\(s\.(\w+)"),
+          ("scan", r"\bs\.(\w+)\.symmetric_difference"), ("scan", r"for \w+ in &?s\.(\w+)\b"),
+          ("scan", r"\bs\.(\w+)\.iter\(\)"))
+
+
+def whole_operations(text: str, frontier: set) -> dict:
+    """{summand: sorted ["<copy | scan> <parameter>"]}: each place the code of a summand
+    (its match, fire and output functions, after their `// <summand>` comment) copies or
+    scans a whole frontier set or list, a cost that grows with the size of the DAG
+    (docs/spec.md §3.13.1)."""
+    out: dict = {}
+    cur = None
+    for line in text.split("\n"):
+        m = re.match(r"// (\S+)$", line)
+        if m:
+            cur = m.group(1)
+            continue
+        if line.startswith(("fn ", "pub fn ")) and not re.match(r"(pub )?fn (match|fire|out)", line):
+            cur = None
+        if cur is None:
+            continue
+        for kind, pat in _WHOLE:
+            for x in re.findall(pat, line):
+                if x in frontier:
+                    out.setdefault(cur, set()).add("%s %s" % (kind, x))
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
+def map_borrows(model) -> dict:
+    """{map: positions} of the set and list arguments the generated user maps of model
+    take by reference (Emitter.borrowable), for a caller that writes its own calls."""
+    em = Emitter(model)
+    eqs: dict = {}
+    for e in model.lps.equations:
+        h = e.lhs.head if isinstance(e.lhs, App) else e.lhs
+        eqs.setdefault(h.name, []).append(e)
+    maps = list(model.user_maps) + [m for m in model.lps.maps if m.name.startswith(INIT_PREFIX)]
+    return em.borrowable({m.name: (m, eqs.get(m.name, [])) for m in maps})
+
+
 def emit(model, st=None, package: str = "generated", workspace: bool = False) -> dict:
     """The files of <generated>/rust/<rust_crate>: {relative path: text}; with st (a
     `stepper.Stepper`), the stepper of the refined Core too (docs/spec.md §3.8)."""
     em = Emitter(st.model if st is not None else model)
+    em.sorted = Sorted([model.lps] + ([st.model.lps] if st is not None else []), em.walks, em.fun_maps,
+                       model.config.id_sorts)
     lps = model.lps
     out = [HEADER.rstrip("\n"), "//! The model's generated code (docs/spec.md §3.11).", RUNTIME]
     out += em.emit_types()
@@ -1712,8 +2107,10 @@ def emit(model, st=None, package: str = "generated", workspace: bool = False) ->
         if h.name.startswith("p_"):
             eqs.setdefault(h.name, []).append(e)
     # the user's maps by name, then the generator's init maps by name (§3.6.2)
-    for m in sorted(umaps, key=lambda m: m.name) + sorted((m for m in lps.maps if m.name.startswith(INIT_PREFIX)),
-                                                         key=lambda m: m.name):
+    emitted = sorted(umaps, key=lambda m: m.name) + sorted((m for m in lps.maps if m.name.startswith(INIT_PREFIX)),
+                                                           key=lambda m: m.name)
+    em.borrows = em.borrowable({m.name: (m, eqs.get(m.name, [])) for m in emitted})
+    for m in emitted:
         out += em.emit_map(m, eqs.get(m.name, []))
         out.append("")
 
@@ -1874,13 +2271,22 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
     """The next state: overlays and new values first, then the writes (§3.8.4); a
     write to what an index reads dirties its id (docs/spec.md §3.8.3)."""
     lines = []
-    commits, writes, deferred, adjs = [], [], [], []
+    commits, writes, deferred, adjs, inplace, listops = [], [], [], [], [], []
     for n, e in s.assigns:
         if n in em.adjs:
             ov = "a_" + ident(n)
             lines.append("    let mut %s: Vec<AdjOp<%s>> = Vec::new();" % (ov, em.param_rtype(n, dict(model.lps.params)[n])[len("Adj<"):-1]))
             em.adj_plan(e, n, scope, lines, "    ", ov)
             adjs.append(n)
+        elif n in fps and _inplace(em, model, s, n, e, fps, watched):
+            inplace.append((n, e))
+        elif n in fps and _list_op(em, model, s, n, e, watched) is not None:
+            kind, k, u, f = _list_op(em, model, s, n, e, watched)
+            t = ident(n)
+            lines.append("    let lk_%s = %s;" % (t, em.expr(k, scope)))
+            if u is not None:
+                lines.append("    let lu_%s = %s;" % (t, em.expr(u, scope)))
+            listops.append((n, kind, None if f is None else em.view_ref(f, scope)))
         elif n in fps:
             o = "o_" + ident(n)
             lines.append("    let mut %s = Ov::over(&s.%s);" % (o, ident(n)))
@@ -1892,7 +2298,7 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
             plan = []
             for k, (kind, r, c) in enumerate(ops):
                 rv = "r_%s_%d" % (ident(n), k)
-                lines.append("    let %s = %s;" % (rv, em.expr(r, scope)))
+                deferred.append((rv, r, None))
                 cv = None
                 if c is not None:
                     cv = "c_%s_%d" % (ident(n), k)
@@ -1911,22 +2317,35 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
                 lines.append("    let %s = VecDeque::from(%s);" % (t, em.expr(e, scope)))
                 writes.append((n, t))
         elif _movable(em, model, n) and not (watched and n in watched):
-            deferred.append((n, e))
+            deferred.append(("n_" + ident(n), e, n))
             writes.append((n, "n_" + ident(n)))
         else:
             t = "n_" + ident(n)
             lines.append("    let %s = %s;" % (t, em.expr(e, scope)))
             writes.append((n, t))
-    # A set or list built from its old value moves the old value in, after every other
-    # read of it: the step then costs what changes, not the size of the set (otherwise
-    # every step copies whole sets).
+    # A sorted per-id list is changed in place (docs/spec.md §3.10.6), after every other
+    # value that reads the old state has been computed and before any is moved out of it.
+    for n, e in inplace:
+        _apply_inplace(em, n, e, scope, lines)
+    # A set or list given a new value here is moved, not copied, into the one expression
+    # that consumes it (its own new value, or another's: `X := X + Y, Y := {}`), once
+    # every other expression that reads it has been evaluated: the step then costs what
+    # changes, not the size of the set (docs/spec.md §3.8.4).
+    movable = {own for _, _, own in deferred if own is not None}
     while deferred:
-        k = next((k for k, (n, _) in enumerate(deferred)
-                  if not any(_occurs(e2, n) for j, (_, e2) in enumerate(deferred) if j != k)), None)
-        n, e = deferred.pop(0 if k is None else k)
-        em.moves = {} if k is None else em.takes(e, n, "std::mem::take(&mut s.%s)" % ident(n))
-        lines.append("    let n_%s = %s;" % (ident(n), em.expr(e, scope)))
-        em.moves, em.hoists = {}, set()
+        free = []
+        for k, (_, e, _) in enumerate(deferred):
+            want = [y for y in sorted(movable) if _occurs(e, y) and em._reach(e, y)]
+            ok = [y for y in want if not any(_occurs(e2, y) for j, (_, e2, _) in enumerate(deferred) if j != k)]
+            free.append((len(ok) < len(want), k, ok))
+        _, k, ys = min(free)
+        lhs, e, _ = deferred.pop(k)
+        em.moves = {}
+        for y in ys:
+            em.moves.update(em.takes(e, y, "std::mem::take(&mut s.%s)" % ident(y), hoist=len(ys) == 1))
+        movable -= set(ys)
+        lines.append("    let %s = %s;" % (lhs, em.expr(e, scope)))
+        em.moves, em.hoists = {}, {}
     for n in adjs:
         lines.append("    for op in a_%s {" % ident(n))
         if watched and n in watched:
@@ -1975,7 +2394,96 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
             lines += ["    for x in s.%s.symmetric_difference(&%s) {" % (ident(n), t),
                       "        s.dirty_%s.push(x.0);" % watched[n], "    }"]
         lines.append("    s.%s = %s;" % (ident(n), t if r is None else 'rt::fit(%s, %d, %d, "%s")?' % (t, r[0], r[1], n)))
+    # A list entry changed in place (§3.10.7), last: every value that reads the old entry
+    # has been computed, and the key function is not written by the summand.
+    for n, kind, f in listops:
+        t = ident(n)
+        if kind == "ins":
+            lines.append("    rt::ins_by_key(s.%s.slot(lk_%s), lu_%s, |x| (%s).get(x));" % (t, t, t, f))
+        elif kind == "tail":
+            lines.append("    rt::pop_first(s.%s.slot(lk_%s.clone()))?;" % (t, t))
+            lines.append("    s.%s.tidy(&lk_%s);" % (t, t))
+        else:
+            lines.append("    rt::rem_first(s.%s.slot(lk_%s.clone()), &lu_%s);" % (t, t, t))
+            lines.append("    s.%s.tidy(&lk_%s);" % (t, t))
     return lines
+
+
+def _list_op(em, model, s, n, e, watched):
+    """The new value of the list column n as one entry k changed in place (docs/spec.md
+    §3.10.7): ("ins", k, u, F) for n[k -> f(u, n(k), F)] with f an insert ordered by a key
+    and n declared kept sorted by F (`key_sorted`), F not written by the summand;
+    ("tail", k, None, None) for n[k -> tail(n(k))]; ("rem", k, u, None) for
+    n[k -> r(n(k), u)] with r a first-occurrence removal. Else None."""
+    if (watched and n in watched) or not (isinstance(e, App) and isinstance(e.head, Op) and e.head.name == "@func_update"
+                                         and len(e.args) == 3 and isinstance(e.args[0], Var) and e.args[0].name == n):
+        return None
+    k, v = e.args[1], e.args[2]
+    if not (isinstance(v, App) and isinstance(v.head, Op)):
+        return None
+
+    def own(x):
+        return isinstance(x, App) and isinstance(x.head, Var) and x.head.name == n and len(x.args) == 1 \
+            and show(x.args[0]) == show(k)
+    h, srt = v.head.name, em.sorted
+    if h == "tail" and len(v.args) == 1 and own(v.args[0]):
+        return ("tail", k, None, None)
+    if h in srt.removes and own(v.args[0]) and not _occurs(v.args[1], n):
+        return ("rem", k, v.args[1], None)
+    f = v.args[2] if h in srt.key_inserts else None
+    if f is not None and own(v.args[1]) and not _occurs(v.args[0], n) and isinstance(f, Var) \
+            and model.config.key_sorted.get(n) == f.name and all(m != f.name for m, _ in s.assigns):
+        return ("ins", k, v.args[0], f)
+    return None
+
+
+def _inplace(em, model, s, n, e, fps: set, watched) -> bool:
+    """Whether the new value of the function parameter n is applied in place: n is a
+    sorted column (docs/spec.md §3.10.6), no index reads it, and every other new value
+    of the summand that reads it is computed before the change (see _fire_body: all
+    but those of sets and lists moved or changed in place, computed after it)."""
+    srt = em.sorted
+    if n not in srt.columns or (watched and n in watched) or not srt.preserves(e, n, srt.columns, srt.walks):
+        return False
+    for m2, e2 in s.assigns:
+        if m2 == n or not _occurs(e2, n):
+            continue
+        late = m2 not in fps and m2 not in em.deques and (
+            _set_inplace(em, model, m2, e2) is not None or (_movable(em, model, m2) and not (watched and m2 in watched)))
+        if late or m2 in srt.columns:
+            return False
+    return True
+
+
+def _apply_inplace(em, n: str, e, scope: dict, lines: list) -> None:
+    """Statements that change the sorted column n in place to its new value e: an
+    ordered insert or merge at one key, or a sorted walk given the column itself."""
+    col = "s.%s" % ident(n)
+    stack = [("fe", e, "    ")]
+    while stack:
+        kind, x, i = stack.pop()
+        if kind == "line":
+            lines.append(i + x)
+            continue
+        if isinstance(x, Var):
+            continue
+        h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
+        if h == "if":
+            stack.append(("line", "}", i))
+            stack.append(("fe", x.args[2], i + "    "))
+            stack.append(("line", "} else {", i))
+            stack.append(("fe", x.args[1], i + "    "))
+            stack.append(("line", "if %s {" % em.expr(x.args[0], scope), i))
+        elif h == "@func_update":
+            kind2, v = em.sorted.update_value(x.args[2], x.args[1], n)
+            k = em.expr(x.args[1], scope)
+            if kind2 == "ins":
+                lines.append(i + "{ let k = %s; let u = %s; rt::ins_sorted(%s.slot(k), u); }" % (k, em.expr(v, scope), col))
+            else:
+                lines.append(i + "{ let k = %s; let l = %s; if !l.is_empty() { let t = %s.slot(k); for x in l { rt::ins_sorted(t, x); } } }"
+                             % (k, em.expr(v, scope), col))
+        else:
+            lines.append(i + "{ %s?; }" % em.call(x, scope, target="&mut %s" % col))
 
 
 def _occurs(e, name: str) -> bool:
@@ -2025,7 +2533,7 @@ def _set_inplace(em, model, n, e):
 
 # ------------------------------------------------------------------ the stepper (docs/spec.md §3.8)
 
-_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3}
+_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3, "within": 4}
 
 
 def _stepper_fields(st) -> list:
@@ -2096,6 +2604,8 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                     "    Ok(s.ix_%s.front(0).is_some())" % ix.name, "}", ""]
         cls = "ixclsno_%s(&ixcls_%s(s, n)?)" % (ix.name, ix.name) if "cls" in ix.eqs else "0"
         key = {"least": "i128::from(v)", "key": "ixkey_%s(s, n)?" % ix.name}.get(ix.order, "s.ix_%s.stamp(v)?" % ix.name)
+        if ix.within:
+            key = "s.ix_%s.key_of(v)?" % ix.within
         out += ["fn ixrefresh_%s(s: &mut S, v: u32) -> Result<(), StepError> {" % ix.name,
                 "    let n = %s(v);" % it,
                 "    if ixmem_%s(s, n)? {" % ix.name,
@@ -2130,17 +2640,24 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     for n, _ in lps.params:
         pscope[n] = em.param_scope(n, fps)
     outs = []
+    labels = []
     for j, k in enumerate(st.outputs):
         s = lps.summands[k]
         a = next(a for a in outputs if a.label == s.label and len(a.sorts) == len(s.args))
         out += ["// %s" % s.name, "fn out%d(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {" % j,
-                "    if !(%s) {" % em.expr(s.cond, pscope), "        return Ok(false);", "    }"]
+                "    if !(%s) {" % em.expr(s.cond, pscope), "        return Ok(false);", "    }",
+                # The firing hook (§3.11.6): one relaxed store, compiled only with the feature.
+                "    #[cfg(feature = \"firing\")]",
+                "    FIRING.store(%d, core::sync::atomic::Ordering::Relaxed);" % (j + 1)]
+        labels.append(s.name)
         args = [em.expr(x, pscope) for x in s.args]
         out.append("    let act = Action::%s%s;" % (camel(a.label), "(%s)" % ", ".join(args) if args else ""))
         out += _fire_body(em, m, s, dict(pscope), fps, st.watched)
         out += ["    out.push(act);", "    Ok(true)", "}", ""]
         outs.append("out%d" % j)
-    out += ["const OUTS: [fn(&mut S, &mut Vec<Action>) -> Result<bool, StepError>; %d] = [%s];" % (len(outs), ", ".join(outs)), "",
+    out += ["const OUTS: [fn(&mut S, &mut Vec<Action>) -> Result<bool, StepError>; %d] = [%s];" % (len(outs), ", ".join(outs)), ""]
+    out += firing_hook(labels)
+    out += [
             "/// The output loop (docs/spec.md §3.8.3): the first enabled output in policy",
             "/// order, until none is.",
             "fn run_loop(s: &mut S, out: &mut Vec<Action>) -> Result<(), StepError> {",
@@ -2159,8 +2676,9 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                     "            let k = &%s(*k);" % type_name(em.types.resolve(t[1][0])[1])] + \
                    em.enc_stmt(t[1][0], "k", "            ") + em.enc_stmt(t[2], "v", "            ") + ["        }", "    }"]
         elif t[0] == "->":
-            out += ["    {", "        let f = &s.%s;" % ident(n)] + em.enc_stmt(t[2], "&f.d", "        ") + \
-                   ["        codec::len(f.m.len(), out);", "        for (k, v) in f.m.iter() {"] + \
+            out += ["    {", "        let f = &s.%s;" % ident(n)] + em.enc_stmt(t[2], "f.default_value()", "        ") + \
+                   ["        let e = f.entries();", "        codec::len(e.len(), out);", "        for (k, v) in e {",
+                    "            let k = &k;"] + \
                    em.enc_stmt(t[1][0], "k", "            ") + em.enc_stmt(t[2], "v", "            ") + ["        }", "    }"]
         elif t[0] == "FSet":
             out += ["    codec::len(s.%s.len(), out);" % ident(n), "    for x in s.%s.iter() {" % ident(n)] + \

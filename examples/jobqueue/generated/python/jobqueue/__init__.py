@@ -8,6 +8,7 @@
 """The model's generated code as Python (docs/spec.md §3.12)."""
 
 import heapq
+from collections import deque
 
 class StepError(Exception):
     """An error of the generated code (docs/spec.md §3.14.2)."""
@@ -55,16 +56,64 @@ def _least(w):
     return min(w)
 
 
+def _dq_head(q):
+    """The head of a queue parameter (repr deque)."""
+    if not q:
+        raise Undefined("head")
+    return q[0]
+
+
+# Whether the state being stepped audits (docs/spec.md §3.9.9): set by _stepper_init.
+_AUDIT = [False]
+
+
+def _place(t, u):
+    """The least i with t[i] >= u in a tuple sorted by id: a binary search."""
+    lo, hi = 0, len(t)
+    if hi and t[hi - 1] < u:
+        return hi
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if t[mid] < u:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def _ins_sorted(u, t, walk):
+    """An ordered insert into a tuple sorted by id (docs/spec.md §3.10.6), at the place
+    a binary search finds; with the audit on, checked against the model's walk."""
+    i = _place(t, u)
+    r = t if i < len(t) and t[i] == u else t[:i] + (u,) + t[i:]
+    if _AUDIT[0] and r != walk(u, t):
+        raise AuditFailed("an ordered insert differs from the model's walk")
+    return r
+
+
+def _merge_sorted(l, t, walk):
+    """An ordered merge of l into a tuple sorted by id (docs/spec.md §3.10.6)."""
+    r = t
+    for u in l:
+        i = _place(r, u)
+        if not (i < len(r) and r[i] == u):
+            r = r[:i] + (u,) + r[i:]
+    if _AUDIT[0] and r != walk(l, t):
+        raise AuditFailed("an ordered merge differs from the model's walk")
+    return r
+
+
 class _Index:
     """An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class a heap
     of (order key, id) with lazy deletion; an entry is valid while its id is a
     member of that class with that order key. Order keys: the id (least), the
-    key's value (key), minus the entry stamp (newest), the stamp (oldest)."""
+    key's value (key), minus the entry stamp (newest), the stamp (oldest), the
+    order key of the index it is within (within)."""
 
     __slots__ = ("order", "ent", "heaps", "stamp")
 
     def __init__(self, order, ncls):
-        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest
+        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest, 4 within
         self.ent = {}  # id -> (class, order key)
         self.heaps = [[] for _ in range(ncls)]
         self.stamp = 0
@@ -78,7 +127,7 @@ class _Index:
         o = self.order
         if o == 0:
             ok = v
-        elif o == 1:
+        elif o in (1, 4):
             ok = k
         elif old is not None:
             ok = old[1]  # a member keeps its stamp, across a change of class too
@@ -469,7 +518,7 @@ def _fire2(s, env):
 def _match3(s, a):
     # c_give_up
     v_j = a[0]
-    if not (((s.st.get(v_j) == 3) and (2 <= s.tries.get(v_j)))):
+    if not (((s.st.get(v_j) == 3) and _m_spent(s.tries.get(v_j)))):
         return None
     return (v_j, )
 
@@ -487,7 +536,7 @@ def _fire3(s, env):
 def _match4(s, a):
     # c_retry
     v_j = a[0]
-    if not (((s.st.get(v_j) == 3) and (not (2 <= s.tries.get(v_j))))):
+    if not (((s.st.get(v_j) == 3) and (not _m_spent(s.tries.get(v_j))))):
         return None
     return (v_j, )
 
@@ -507,7 +556,7 @@ def _fire4(s, env):
 def _match5(s, a):
     # c_start
     v_j = a[0]
-    if not (((v_j in s.Q) and (0 < s.slots))):
+    if not (((v_j in s.Q) and (s.slots > 0))):
         return None
     return (v_j, )
 
@@ -726,7 +775,7 @@ def _fire_s2(s, env):
 
 def _out0(s, out):
     # c_give_up
-    if not ((_ixsome_spent(s) and ((s.st.get(_ixfirst_spent(s)) == 3) and (2 <= s.tries.get(_ixfirst_spent(s)))))):
+    if not ((_ixsome_spent(s) and ((s.st.get(_ixfirst_spent(s)) == 3) and _m_spent(s.tries.get(_ixfirst_spent(s)))))):
         return False
     out.append((0, _ixfirst_spent(s),))
     _p_st = []
@@ -740,7 +789,7 @@ def _out0(s, out):
 
 def _out1(s, out):
     # c_retry
-    if not ((_ixsome_retryable(s) and ((s.st.get(_ixfirst_retryable(s)) == 3) and (not (2 <= s.tries.get(_ixfirst_retryable(s))))))):
+    if not ((_ixsome_retryable(s) and ((s.st.get(_ixfirst_retryable(s)) == 3) and (not _m_spent(s.tries.get(_ixfirst_retryable(s))))))):
         return False
     out.append((1, _ixfirst_retryable(s),))
     _p_st = []
@@ -756,7 +805,7 @@ def _out1(s, out):
 
 def _out2(s, out):
     # c_start
-    if not (((not (s.Q == frozenset())) and ((_least(s.Q) in s.Q) and (0 < s.slots)))):
+    if not (((s.Q != frozenset()) and ((_least(s.Q) in s.Q) and (s.slots > 0)))):
         return False
     out.append((2, _least(s.Q),))
     _p_st = []
@@ -818,6 +867,7 @@ def _state_bytes(s):
 
 def _stepper_init(s, audit):
     s._audit = audit
+    _AUDIT[0] = audit
     s._d_Job = []
     s.st.w = s._d_Job
     s.tries.w = s._d_Job

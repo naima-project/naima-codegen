@@ -1,0 +1,33 @@
+% core.mcrl2 -- a queue kept in key order (docs/spec.md §3.10.7): items are given a
+% key, then queued in key order, then taken from the front or removed.
+
+sort Item = struct item(ix: Nat);
+
+map  k_ins: Item # List(Item) # (Item -> Nat) -> List(Item);
+     k_rem: List(Item) # Item -> List(Item);
+var  u, n: Item; l: List(Item); f: Item -> Nat;
+eqn  k_ins(u, [], f) = [u];
+     k_ins(u, n |> l, f) = if(f(u) < f(n), u |> (n |> l), n |> k_ins(u, l, f));
+     k_rem([], u) = [];
+     k_rem(n |> l, u) = if(n == u, l, n |> k_rem(l, u));
+
+act  c_put: Item # Nat;
+     c_take, c_drop: Item;
+     c_queue: Item;
+
+proc Core(ni: Nat, key: Item -> Nat, fresh: FSet(Item), q: Item -> List(Item), taken: Nat) =
+%@input
+    sum i: Item, p: Nat . (ix(i) == ni) ->
+      c_put(i, p) . Core(ni = ni + 1, key = key[i -> p], fresh = fresh + {i})
+%@input
+  + sum i: Item . (q(item(0)) != [] && i == head(q(item(0)))) ->
+      c_take(i) . Core(q = q[item(0) -> tail(q(item(0)))], taken = taken + 1)
+%@input
+  + sum i: Item . (i in q(item(0))) ->
+      c_drop(i) . Core(q = q[item(0) -> k_rem(q(item(0)), i)])
+%@order 1
+  + sum i: Item . (i in fresh) ->
+      c_queue(i) . Core(fresh = fresh - {i}, q = q[item(0) -> k_ins(i, q(item(0)), key)])
+
+%@observers
+  + delta;

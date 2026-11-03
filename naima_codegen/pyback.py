@@ -24,13 +24,15 @@ import re
 from .expr import App, Bind, Num, Op, Var, Whr, show
 from .frontend import INIT_PREFIX
 from .functions import is_fun, mentions
+from .sortedlists import Sorted
 from .lower import Types, codec_desc, fun_params, g10, plan_summand, width_range
 
-from .header import block as _header_block
+from .header import block as _header_block  # noqa: E402
 HEADER = _header_block("#")
 
 RUNTIME = '''
 import heapq
+from collections import deque
 
 class StepError(Exception):
     """An error of the generated code (docs/spec.md §3.14.2)."""
@@ -78,16 +80,64 @@ def _least(w):
     return min(w)
 
 
+def _dq_head(q):
+    """The head of a queue parameter (repr deque)."""
+    if not q:
+        raise Undefined("head")
+    return q[0]
+
+
+# Whether the state being stepped audits (docs/spec.md §3.9.9): set by _stepper_init.
+_AUDIT = [False]
+
+
+def _place(t, u):
+    """The least i with t[i] >= u in a tuple sorted by id: a binary search."""
+    lo, hi = 0, len(t)
+    if hi and t[hi - 1] < u:
+        return hi
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if t[mid] < u:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def _ins_sorted(u, t, walk):
+    """An ordered insert into a tuple sorted by id (docs/spec.md §3.10.6), at the place
+    a binary search finds; with the audit on, checked against the model's walk."""
+    i = _place(t, u)
+    r = t if i < len(t) and t[i] == u else t[:i] + (u,) + t[i:]
+    if _AUDIT[0] and r != walk(u, t):
+        raise AuditFailed("an ordered insert differs from the model's walk")
+    return r
+
+
+def _merge_sorted(l, t, walk):
+    """An ordered merge of l into a tuple sorted by id (docs/spec.md §3.10.6)."""
+    r = t
+    for u in l:
+        i = _place(r, u)
+        if not (i < len(r) and r[i] == u):
+            r = r[:i] + (u,) + r[i:]
+    if _AUDIT[0] and r != walk(l, t):
+        raise AuditFailed("an ordered merge differs from the model's walk")
+    return r
+
+
 class _Index:
     """An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class a heap
     of (order key, id) with lazy deletion; an entry is valid while its id is a
     member of that class with that order key. Order keys: the id (least), the
-    key's value (key), minus the entry stamp (newest), the stamp (oldest)."""
+    key's value (key), minus the entry stamp (newest), the stamp (oldest), the
+    order key of the index it is within (within)."""
 
     __slots__ = ("order", "ent", "heaps", "stamp")
 
     def __init__(self, order, ncls):
-        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest
+        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest, 4 within
         self.ent = {}  # id -> (class, order key)
         self.heaps = [[] for _ in range(ncls)]
         self.stamp = 0
@@ -101,7 +151,7 @@ class _Index:
         o = self.order
         if o == 0:
             ok = v
-        elif o == 1:
+        elif o in (1, 4):
             ok = k
         elif old is not None:
             ok = old[1]  # a member keeps its stamp, across a change of class too
@@ -400,6 +450,11 @@ class Emitter:
         self.fun_maps = model.fun_maps
         self.walks = model.walks
         self.tmp = 0
+        # sorted per-id lists (docs/spec.md §3.10.6), set by emit
+        self.sorted = Sorted([model.lps], {}, {}, ())
+        # queue parameters (repr deque): a collections.deque in the state, read at its
+        # head, tailed and appended in place, as in the Rust backend
+        self.deques = {p.name for p in model.params if p.repr == "deque"}
 
     def fresh(self, base: str = "t") -> str:
         self.tmp += 1
@@ -419,7 +474,7 @@ class Emitter:
             if isinstance(x, Var):
                 if x.name not in scope:
                     raise g10("expression %s" % show(e)[:80], "variable %s is not in scope" % x.name)
-                out.append(scope[x.name])
+                out.append("tuple(%s)" % scope[x.name] if self._dq(x, scope) else scope[x.name])
                 continue
             if isinstance(x, Op):
                 out.append(self._const(x))
@@ -441,6 +496,10 @@ class Emitter:
             # App
             h = x.head
             hn = h.name if isinstance(h, Op) else None
+            q = self._dq_read(x, hn, scope)
+            if q is not None:
+                out.append(q)
+                continue
             if hn == "if" and len(x.args) == 3:
                 if not seen:
                     stack.append((x, True))
@@ -472,6 +531,23 @@ class Emitter:
                 continue
             out.append(self._app(x, hn, args))
         return out[-1]
+
+    def _dq(self, x, scope) -> bool:
+        """Whether x is a queue parameter of the state (repr deque)."""
+        return isinstance(x, Var) and x.name in self.deques and scope.get(x.name) == "s.%s" % ident(x.name)
+
+    def _dq_read(self, x, hn, scope):
+        """A read of a queue parameter in place: its head, its length, whether it is empty."""
+        a = x.args
+        if hn == "head" and len(a) == 1 and self._dq(a[0], scope):
+            return "_dq_head(%s)" % scope[a[0].name]
+        if hn == "#" and len(a) == 1 and self._dq(a[0], scope):
+            return "len(%s)" % scope[a[0].name]
+        if hn in ("==", "!=") and len(a) == 2:
+            for q, o in ((a[0], a[1]), (a[1], a[0])):
+                if self._dq(q, scope) and isinstance(o, Op) and o.name == "[]":
+                    return "(%slen(%s) == 0)" % ("" if hn == "==" else "not ", scope[q.name])
+        return None
 
     def ix_app(self, x, hn: str, scope: dict) -> str:
         """A selection operation of the refined Core (docs/spec.md §3.7.5): the
@@ -648,10 +724,12 @@ class Emitter:
         text = "_m_%s(%s)" % (ident(name), ", ".join(args))
         return (text, defaults) if eager else text
 
-    def plan(self, fe, root: str, scope: dict, lines: list, indent: str, planvar: str):
+    def plan(self, fe, root: str, scope: dict, lines: list, indent: str, planvar: str, sorted_root: bool = False):
         """Lines that append to `planvar` the writes of a function expression built
         from `root` (§3.4.8), evaluating every index, value and condition now,
-        before anything is written (§3.8.4)."""
+        before anything is written (§3.8.4). With `sorted_root` (root a sorted
+        column, or a sorted walk's parameter, docs/spec.md §3.10.6), an ordered insert
+        or merge into root's own entry is done by a binary search."""
         stack = [("fe", fe, indent)]
         while stack:
             kind, x, ind = stack.pop()
@@ -663,7 +741,14 @@ class Emitter:
             h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
             if h == "@func_update":
                 i = self.expr(x.args[1], scope)
-                v = self.expr(x.args[2], scope)
+                up = self.sorted.update_value(x.args[2], x.args[1], root) \
+                    if sorted_root and isinstance(x.args[0], Var) and x.args[0].name == root else None
+                if up is not None:
+                    fn = "_ins_sorted" if up[0] == "ins" else "_merge_sorted"
+                    v = "%s(%s, %s, _m_%s)" % (fn, self.expr(up[1], scope), self.expr(x.args[2].args[1], scope),
+                                               ident(x.args[2].head.name))
+                else:
+                    v = self.expr(x.args[2], scope)
                 stack.append(("line", "%s.append((0, %s, %s))" % (planvar, i, v), ind))
                 stack.append(("fe", x.args[0], ind))
             elif h == "if":
@@ -812,7 +897,7 @@ class Emitter:
             return [ind + "_r = %s" % self.expr(x, scope)]
         root = w.params[w.ret_pos]
         pl = []
-        self.plan(x, root, scope, pl, ind, "_p")
+        self.plan(x, root, scope, pl, ind, "_p", sorted_root=self.sorted.walks.get(w.name) == w.ret_pos)
         return [ind + "_p = []"] + pl + [ind + "_r = _run(%s, _p)" % scope[root]]
 
     def _walk_continue(self, w, m, x, scope, ind) -> list:
@@ -828,7 +913,7 @@ class Emitter:
                 pv = self.fresh("p")
                 lines.append(ind + "%s = []" % pv)
                 pl = []
-                self.plan(a, p, scope, pl, ind, pv)
+                self.plan(a, p, scope, pl, ind, pv, sorted_root=self.sorted.walks.get(m.name) == j)
                 lines.extend(pl)
                 plans.append((scope[p], pv))
             else:
@@ -850,6 +935,8 @@ def emit(model, st=None) -> str:
     """The text of <generated>/python/<python_package>/__init__.py; with st (a
     `stepper.Stepper`), the stepper of the refined Core too (docs/spec.md §3.8)."""
     em = Emitter(st.model if st is not None else model)
+    em.sorted = Sorted([model.lps] + ([st.model.lps] if st is not None else []), em.walks, em.fun_maps,
+                       model.config.id_sorts)
     lps = model.lps
     lines = [HEADER.rstrip("\n"), '"""The model\'s generated code as Python (docs/spec.md §3.12)."""', RUNTIME]
     eqs: dict = {}
@@ -887,6 +974,8 @@ def emit(model, st=None) -> str:
             continue
         if r is not None:
             val = "_fit(%s, %d, %d, %r)" % (val, r[0], r[1], n)
+        if n in em.deques:
+            val = "deque(%s)" % val
         lines.append("    s.%s = %s" % (ident(n), val))
     lines.append("    return s")
     extra = _stepper_slots(st) if st is not None else []
@@ -1000,9 +1089,22 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, plan, watched: dict
             pv = "_p_" + ident(n)
             lines.append("    %s = []" % pv)
             pl = []
-            em.plan(e, n, scope, pl, "    ", pv)
+            em.plan(e, n, scope, pl, "    ", pv, sorted_root=n in em.sorted.columns)
             lines.extend(pl)
             plans[n] = pv
+        elif n in em.deques:
+            t = "_n_" + ident(n)
+            hn = e.head.name if isinstance(e, App) and isinstance(e.head, Op) else None
+            if hn == "tail" and isinstance(e.args[0], Var) and e.args[0].name == n:
+                writes.append((n, ("pop", None)))
+            elif hn == "++" and isinstance(e.args[0], Var) and e.args[0].name == n:
+                lines.append("    %s = %s" % (t, em.expr(e.args[1], scope)))
+                writes.append((n, ("extend", t)))
+            elif isinstance(e, Var) and e.name == n:
+                pass
+            else:
+                lines.append("    %s = deque(%s)" % (t, em.expr(e, scope)))
+                writes.append((n, t))
         else:
             t = "_n_" + ident(n)
             lines.append("    %s = %s" % (t, em.expr(e, scope)))
@@ -1010,6 +1112,13 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, plan, watched: dict
     for n in plan.fun_order:
         lines.append("    _run(s.%s, %s)" % (ident(n), plans[n]))
     for n, t in writes:
+        if isinstance(t, tuple):
+            # a queue changed in place (repr deque)
+            if t[0] == "pop":
+                lines += ["    if not s.%s:" % ident(n), '        raise Undefined("tail")', "    s.%s.popleft()" % ident(n)]
+            else:
+                lines.append("    s.%s.extend(%s)" % (ident(n), t[1]))
+            continue
         r = width_range(model, n)
         if watched and n in watched:
             lines.append("    s._d_%s.extend(sorted(s.%s ^ %s))" % (watched[n], ident(n), t))
@@ -1027,7 +1136,7 @@ def _step(c, j) -> str:
 
 # ------------------------------------------------------------------ the stepper (docs/spec.md §3.8)
 
-_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3}
+_ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3, "within": 4}
 
 
 def _stepper_slots(st) -> list:
@@ -1070,6 +1179,7 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                   "    if _ixmem_%s(s, v):" % ix.name,
                   "        s._ix_%s.refresh(v, True, %s, %s)" % (
                       ix.name, "_ixcls_%s(s, v)" % ix.name if "cls" in ix.eqs else "0",
+                      "s._ix_%s.ent[v][1]" % ix.within if ix.within else
                       "_ixkey_%s(s, v)" % ix.name if "key" in ix.eqs else "0"),
                   "    else:", "        s._ix_%s.refresh(v, False, 0, 0)" % ix.name]
     sorts = sorted({ix.sort for ix in st.indexes} | set(st.watched.values()))
@@ -1103,6 +1213,11 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                       "    s._aud_%s = %s" % (n, "entered[::-1] + keep" if ix.order == "newest" else "keep + entered"),
                       "    if s._ix_%s.ordered() != s._aud_%s:" % (n, n),
                       "        raise AuditFailed('index %s: order %%r, by definition %%r' %% (s._ix_%s.ordered(), s._aud_%s))" % (n, n, n)]
+        elif ix.within:
+            # the order by definition: the list of the index it is within, filtered (§3.7.4 item 4)
+            lines += ["    now = set(ref)", "    want = [v for v in s._aud_%s if v in now]" % ix.within,
+                      "    if s._ix_%s.ordered() != want:" % n,
+                      "        raise AuditFailed('index %s: order %%r, by definition %%r' %% (s._ix_%s.ordered(), want))" % (n, n)]
         else:
             okey = "_ixkey_%s(s, v), v" % n if "key" in ix.eqs else "v"
             lines += ["    if s._ix_%s.ordered() != sorted(ref, key=lambda v: (%s)):" % (n, okey),
@@ -1136,7 +1251,7 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     for n, srt in lps.params:
         lines += _enc_param(em, n, srt)
     lines.append("    return bytes(out)")
-    init = ["    s._audit = audit"]
+    init = ["    s._audit = audit", "    _AUDIT[0] = audit"]
     for srt in sorts:
         init.append("    s._d_%s = []" % srt)
     for p, srt in sorted(st.watched.items()):
