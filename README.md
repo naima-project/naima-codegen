@@ -87,8 +87,8 @@ With `typescript` among the backends, the generator writes two modules
 the model does not allow the event, and `inputs` and `outputs` export the
 transition table as data. `form.svelte.ts` wraps it in a class whose state is
 `$state` fields behind a read-only `view`, with one method per input label;
-the output actions are calls to a port the caller passes in, and what the
-port's side effects return comes back as input methods:
+the output actions are calls to the outputs object the caller passes in
+(`FormOutputs`), and what its side effects return comes back as input methods:
 
 ```svelte
 <script lang="ts">

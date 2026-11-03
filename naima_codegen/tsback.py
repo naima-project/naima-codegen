@@ -10,7 +10,7 @@ Core as a function from a state and an event to the next state and the actions,
 with its transition table exported as data (§3.18.3). `<module>.svelte.ts`,
 written only with a policy, wraps the stepper in a Svelte 5 class: the state as
 `$state.raw` fields behind a read-only view, one method per input label, and
-the output actions as calls to a port the caller injects (§3.18.4).
+the output actions as calls to the outputs object the caller injects (§3.18.4).
 
 Values: Bool is `boolean`; integers and ids are `number`, every arithmetic
 result checked to be a safe integer (§3.18.2); an enumeration is the name of
@@ -1685,13 +1685,13 @@ def _svelte(model, st, module: str) -> str:
     lps = model.lps
     inputs, outputs = _labels(model)
     cn = class_name(module)
-    port, view = cn + "Port", cn + "View"
+    outs, view = cn + "Outputs", cn + "View"
     sorts = dict(lps.params)
     types = sorted({type_name(n) for n in lps.structs} | {type_name(n) for n in lps.aliases if n not in lps.structs})
     lines = [HEADER.rstrip("\n"),
              "// The model's stepper as a Svelte 5 state machine (docs/spec.md §3.18.4). Components read `view` and call",
-             "// one method per input label; the machine calls the port for every output action, and the results of what",
-             "// the port does come back as input methods. The logic is all in %s.ts; nothing here decides anything." % module,
+             "// one method per input label; the machine calls its outputs for every output action, and the results of what",
+             "// the outputs do come back as input methods. The logic is all in %s.ts; nothing here decides anything." % module,
              'import * as M from "./%s.ts";' % module,
              "import type { Action, Config, Event, Fn, State } from \"./%s.ts\";" % module]
     if types:
@@ -1700,7 +1700,7 @@ def _svelte(model, st, module: str) -> str:
     if types:
         lines.append("export type { %s };" % ", ".join(types))
     lines += ["", "/** What the machine asks the outside world to do: one method per output action. Called after the",
-              " * state has changed, in the order the model takes the actions. */", "export interface %s {" % port]
+              " * state has changed, in the order the model takes the actions. */", "export interface %s {" % outs]
     used = set()
     for a in outputs:
         n = camel(a.label)
@@ -1710,6 +1710,8 @@ def _svelte(model, st, module: str) -> str:
         lines.append("  %s(%s): void;" % (n, ", ".join("%s: %s" % (f, em.ts_type(s)) for f, s in zip(fs, a.sorts))))
     lines += ["  /** An input the model does not allow now was called; nothing changed. */",
               "  refused?(event: Event): void;", "}", "",
+              "/** @deprecated The old name of %s, kept for one release, then removed. */" % outs,
+              "export type %sPort = %s;" % (cn, outs), "",
               "/** The state, read only: one property per parameter of the model. */", "export interface %s {" % view]
     lines += ["  readonly %s: %s;" % (ident(n), em.ts_type(srt)) for n, srt in lps.params]
     lines += ["}", "", "class _Fields implements %s {" % view]
@@ -1725,9 +1727,9 @@ def _svelte(model, st, module: str) -> str:
               "/** The machine: the state as reactive fields, one method per input label (docs/spec.md §3.18.4). */",
               "export class %s {" % cn,
               "  /** The state, for components: read only; it changes only through the input methods. */",
-              "  readonly view: %s;" % view, "  readonly #fields: _Fields;", "  readonly #port: %s;" % port,
+              "  readonly view: %s;" % view, "  readonly #fields: _Fields;", "  readonly #outputs: %s;" % outs,
               "  #state: State;", "  #error: M.StepError | null;", "  #queue: Action[] = [];", "  #busy = false;",
-              "", "  constructor(config: Config, port: %s) {" % port, "    this.#port = port;",
+              "", "  constructor(config: Config, outputs: %s) {" % outs, "    this.#outputs = outputs;",
               "    const r = M.initial(config);",
               "    // Reactive too, so that what reads allowed() or stopped is updated with the fields.",
               "    this.#state = $state.raw(r.state);", "    this.#error = $state.raw(null);",
@@ -1747,10 +1749,10 @@ def _svelte(model, st, module: str) -> str:
     lines += ["", "  #input(event: Event): boolean {", "    let r: M.Step | null = null;", "    if (this.#error === null) {",
               "      try {", "        r = M.step(this.#state, event);", "      } catch (e) {",
               "        if (!(e instanceof M.StepError)) throw e;", "        this.#error = e;", "        return false;", "      }", "    }",
-              "    if (r === null) {", "      this.#port.refused?.(event);", "      return false;", "    }",
+              "    if (r === null) {", "      this.#outputs.refused?.(event);", "      return false;", "    }",
               "    this.#state = r.state;", "    this.#fields.__show(r.state);", "    this.#emit(r.actions);", "    return true;",
               "  }", "", "  #emit(actions: readonly Action[]): void {",
-              "    // A port may call an input method while it is called: its actions wait for the ones before them.",
+              "    // An output may call an input method while it is called: its actions wait for the ones before them.",
               "    this.#queue.push(...actions);", "    if (this.#busy) return;", "    this.#busy = true;", "    try {",
               "      for (let a = this.#queue.shift(); a !== undefined; a = this.#queue.shift()) {",
               "        switch (a.type) {"]
@@ -1758,7 +1760,7 @@ def _svelte(model, st, module: str) -> str:
         n = camel(a.label)
         pn = n + "_" if n == "refused" else n
         lines += ["          case %s:" % _q(n),
-                  "            this.#port.%s(%s);" % (pn, ", ".join("a.%s" % f for f in _fields(a))), "            break;"]
+                  "            this.#outputs.%s(%s);" % (pn, ", ".join("a.%s" % f for f in _fields(a))), "            break;"]
     lines += ["        }", "      }", "    } finally {", "      this.#busy = false;", "    }", "  }", "}"]
     _ = sorts
     return "\n".join(lines) + "\n"

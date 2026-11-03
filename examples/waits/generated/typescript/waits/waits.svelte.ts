@@ -6,8 +6,8 @@
 // To change it: change the model, verify its properties, run
 // naima-codegen generate, and commit the model and the generated directory together.
 // The model's stepper as a Svelte 5 state machine (docs/spec.md §3.18.4). Components read `view` and call
-// one method per input label; the machine calls the port for every output action, and the results of what
-// the port does come back as input methods. The logic is all in waits.ts; nothing here decides anything.
+// one method per input label; the machine calls its outputs for every output action, and the results of what
+// the outputs do come back as input methods. The logic is all in waits.ts; nothing here decides anything.
 import * as M from "./waits.ts";
 import type { Action, Config, Event, Fn, State } from "./waits.ts";
 import type { Key, Phase, Task, Val } from "./waits.ts";
@@ -17,13 +17,16 @@ export type { Key, Phase, Task, Val };
 
 /** What the machine asks the outside world to do: one method per output action. Called after the
  * state has changed, in the order the model takes the actions. */
-export interface WaitsPort {
+export interface WaitsOutputs {
   drop(task: Task): void;
   start(task: Task): void;
   tell(waiter: Task, task: Task): void;
   /** An input the model does not allow now was called; nothing changed. */
   refused?(event: Event): void;
 }
+
+/** @deprecated The old name of WaitsOutputs, kept for one release, then removed. */
+export type WaitsPort = WaitsOutputs;
 
 /** The state, read only: one property per parameter of the model. */
 export interface WaitsView {
@@ -115,14 +118,14 @@ export class Waits {
   /** The state, for components: read only; it changes only through the input methods. */
   readonly view: WaitsView;
   readonly #fields: _Fields;
-  readonly #port: WaitsPort;
+  readonly #outputs: WaitsOutputs;
   #state: State;
   #error: M.StepError | null;
   #queue: Action[] = [];
   #busy = false;
 
-  constructor(config: Config, port: WaitsPort) {
-    this.#port = port;
+  constructor(config: Config, outputs: WaitsOutputs) {
+    this.#outputs = outputs;
     const r = M.initial(config);
     // Reactive too, so that what reads allowed() or stopped is updated with the fields.
     this.#state = $state.raw(r.state);
@@ -174,7 +177,7 @@ export class Waits {
       }
     }
     if (r === null) {
-      this.#port.refused?.(event);
+      this.#outputs.refused?.(event);
       return false;
     }
     this.#state = r.state;
@@ -184,7 +187,7 @@ export class Waits {
   }
 
   #emit(actions: readonly Action[]): void {
-    // A port may call an input method while it is called: its actions wait for the ones before them.
+    // An output may call an input method while it is called: its actions wait for the ones before them.
     this.#queue.push(...actions);
     if (this.#busy) return;
     this.#busy = true;
@@ -192,13 +195,13 @@ export class Waits {
       for (let a = this.#queue.shift(); a !== undefined; a = this.#queue.shift()) {
         switch (a.type) {
           case "drop":
-            this.#port.drop(a.task);
+            this.#outputs.drop(a.task);
             break;
           case "start":
-            this.#port.start(a.task);
+            this.#outputs.start(a.task);
             break;
           case "tell":
-            this.#port.tell(a.waiter, a.task);
+            this.#outputs.tell(a.waiter, a.task);
             break;
         }
       }
