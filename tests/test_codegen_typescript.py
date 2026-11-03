@@ -155,6 +155,8 @@ class Modules(unittest.TestCase):
     def test_node_imports_the_plain_module_by_type_stripping(self):
         if ts.node() is None:
             self.skipTest("node is not installed")
+        if not ts.node_strips_types():
+            self.skipTest("this node has no TypeScript support (process.features.typescript is off)")
         for n in EXAMPLES:
             r = ts.node_import(_example(n).plain)
             self.assertEqual(r.returncode, 0, "%s: %s" % (n, r.stderr[-3000:]))

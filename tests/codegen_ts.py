@@ -73,6 +73,13 @@ def check(*modules: Path) -> subprocess.CompletedProcess:
                               capture_output=True, text=True, timeout=900)
 
 
+def node_strips_types() -> bool:
+    """Whether this Node runs TypeScript by type stripping: Node 22.18 or later, built with its TypeScript support."""
+    r = subprocess.run([node(), "--experimental-strip-types", "--no-warnings", "-p", "Boolean(process.features.typescript)"],
+                       capture_output=True, text=True, timeout=60)
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
 def node_import(module: Path) -> subprocess.CompletedProcess:
     """Node importing the module by type stripping alone (no transpiler): its exported names on standard output."""
     script = "const m = await import(%s); console.log(Object.keys(m).sort().join(' '));" % json.dumps(module.as_uri())
