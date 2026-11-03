@@ -50,20 +50,20 @@ summand c_crashed
   entered := entered[FAILED -> Pos2Nat((entered(FAILED) + 1))]
 summand c_give_up
   sum j: Job
-  cond ((st(j) == FAILED) && (2 <= tries(j)))
+  cond ((st(j) == FAILED) && spent(tries(j)))
   act  c_give_up(j)
   st := st[j -> GAVEUP]
   entered := entered[GAVEUP -> Pos2Nat((entered(GAVEUP) + 1))]
 summand c_retry
   sum j: Job
-  cond ((st(j) == FAILED) && !(2 <= tries(j)))
+  cond ((st(j) == FAILED) && !spent(tries(j)))
   act  c_retry(j)
   st := st[j -> QUEUED]
   Q := (Q + ({j} + {}))
   entered := entered[QUEUED -> Pos2Nat((entered(QUEUED) + 1))]
 summand c_start
   sum j: Job
-  cond ((j in Q) && (0 < slots))
+  cond ((j in Q) && (slots > 0))
   act  c_start(j)
   st := st[j -> RUNNING]
   tries := tries[j -> Pos2Nat((tries(j) + 1))]

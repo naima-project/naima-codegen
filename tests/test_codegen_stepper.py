@@ -250,6 +250,37 @@ class Policy(unittest.TestCase):
         codes, msgs = self._codes(lambda t: t.replace('order = ["c_give_up"', 'maps = """\nmap qfirst: Nat;\neqn qfirst = 0;\n"""\n\norder = ["c_give_up"'))
         self.assertIn("G9", codes, msgs)
 
+    def test_the_per_id_layout_and_its_limit(self):
+        """§3.13.4: a job takes st (an enumeration, 1 byte), tries (u8, 1 byte), one bit for
+        each of the indexes retryable and spent and for the queue Q read by least (3 bits,
+        one byte), and the 8-byte stamps of retryable (oldest): 11 bytes; a limit below is G11."""
+        import json
+
+        from naima_codegen import outputs
+        from naima_codegen.errors import GeneratorError
+        from naima_codegen.project import load
+
+        lay = json.loads((EXAMPLE / "generated" / "MANIFEST.json").read_text())["layout"]
+        self.assertEqual(lay["rust"]["Job"], {"bytes": 11, "columns": {"st": 1, "tries": 1}, "entries": {}, "bit_columns": [],
+                                              "index_bits": 3, "stamps": 8})
+        d = _policy_root(lambda t: t)
+        try:
+            toml = d / "codegen.toml"
+            toml.write_text("bytes_per_id = { Job = 10 }\n" + toml.read_text())
+            with self.assertRaises(GeneratorError) as e:
+                outputs.build(load(d), run(d), PIN)
+            self.assertEqual([x.code for x in e.exception.diagnostics], ["G11"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_a_key_that_is_not_a_column_read_needs_its_sort(self):
+        spent = 'member = "st(j) == FAILED && tries(j) >= retries"\norder = "least"'
+        keyed = 'member = "st(j) == FAILED && tries(j) >= retries"\norder = "key"\nkey = "if(tries(j) > 1, 0, tries(j) + 1)"'
+        codes, msgs = self._codes(lambda t: t.replace(spent, keyed))
+        self.assertEqual(codes, ["G9"], msgs)
+        self.assertTrue(any("key_sort" in m for m in msgs), msgs)
+        self.assertEqual(self._codes(lambda t: t.replace(spent, keyed + '\nkey_sort = "Nat"')), ([], []))
+
     def test_a_name_starting_with_ix_is_g9(self):
         codes, msgs = self._codes(lambda t: t, lambda c: c.replace("spent", "ix_spent"))
         self.assertIn("G9", codes, msgs)
@@ -374,6 +405,63 @@ def _run_rust_sequences(model, types, m, seqs, package=PACKAGE, crate=GEN / "rus
         return out
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+@unittest.skipIf(shutil.which("cargo") is None, "needs cargo")
+class FiringHook(unittest.TestCase):
+    """The firing hook (§3.11.6) of the example's generated crate: the labels in
+    policy order, one store per output summand under the feature `firing`, and
+    `firing()` naming the summand fired last with the feature, `None` without."""
+
+    CRATE = GEN / "rust" / PACKAGE
+
+    def test_every_output_summand_posts_its_index_under_the_feature(self):
+        from naima_codegen import rustback
+
+        lib = (self.CRATE / "src" / "lib.rs").read_text()
+        outs = re.findall(r"(?m)^fn out(\d+)\(", lib)
+        self.assertTrue(outs)
+        labels = re.search(r"pub const OUTPUT_LABELS: \[&str; (\d+)\] = \[(.*)\];", lib)
+        self.assertIsNotNone(labels)
+        self.assertEqual(int(labels.group(1)), len(outs))
+        names = re.findall(r'"([^"]*)"', labels.group(2))
+        for j in outs:
+            body = lib.split("fn out%s(" % j, 1)[1].split("\n}\n", 1)[0]
+            comment = lib.split("fn out%s(" % j, 1)[0].rstrip().rsplit("\n", 1)[1]
+            self.assertEqual(comment, "// %s" % names[int(j)])
+            self.assertEqual(body.count('#[cfg(feature = "firing")]\n    FIRING.store(%d, core::sync::atomic::Ordering::Relaxed);'
+                                        % (int(j) + 1)), 1, body)
+            self.assertEqual(body.count("FIRING"), 1, body)
+        self.assertIn("\n[features]", rustback.cargo_toml("x", False))
+        self.assertIn("\nfiring = []\n", rustback.cargo_toml("x", True))
+
+    def _run(self, features: bool) -> str:
+        main = "\n".join([
+            "use %s::*;" % PACKAGE, "", "fn main() {",
+            "    let mut out = Vec::new();",
+            "    let mut s = State::new(Config { w: 2 }, &mut out).unwrap();",
+            '    println!("{:?}", firing());',
+            "    s.step(&Event::Submit(Job(0)), &mut out).unwrap();",
+            '    println!("{:?} {:?}", out, firing());', "}", ""])
+        d = Path(tempfile.mkdtemp(prefix="naima-codegen-firing-"))
+        try:
+            (d / "src").mkdir()
+            dep = '%s = { path = "%s"%s }' % (PACKAGE, self.CRATE, ', features = ["firing"]' if features else "")
+            (d / "Cargo.toml").write_text('[package]\nname = "firing"\nversion = "0.0.0"\nedition = "2024"\npublish = false\n\n'
+                                          '[dependencies]\n%s\n\n[workspace]\n' % dep)
+            (d / "src" / "main.rs").write_text(main)
+            shutil.copyfile(ROOT / "rust-toolchain.toml", d / "rust-toolchain.toml")
+            target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target" / "codegen-tests"))
+            r = subprocess.run(["cargo", "run", "--quiet", "--offline"], cwd=d, capture_output=True, text=True,
+                               env=dict(os.environ, CARGO_TARGET_DIR=str(target / ("firing-on" if features else "firing-off"))))
+            self.assertEqual(r.returncode, 0, r.stderr[-3000:])
+            return r.stdout
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_firing_names_the_summand_fired_last_only_with_the_feature(self):
+        self.assertEqual(self._run(True), 'None\n[Start(Job(0))] Some("c_start")\n')
+        self.assertEqual(self._run(False), "None\n[Start(Job(0))] None\n")
 
 
 if __name__ == "__main__":

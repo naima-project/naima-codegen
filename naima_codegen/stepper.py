@@ -36,6 +36,7 @@ class IndexCode:
     cls_sort: str | None = None
     watched: list = field(default_factory=list)  # parameters whose writes dirty an id (member, class, key)
     key_sort: tuple | None = None  # the sort of the key of an index of order key (§3.7.6)
+    within: str | None = None  # order within: the index whose order key it takes (refreshed before it)
 
 
 @dataclass
@@ -117,7 +118,7 @@ def _indexes(lps, refined: Refined, model: Model):
             eqs[h.name] = e
     out, watched = [], {}
     for name, info in refined.indexes.items():
-        ic = IndexCode(name, info.sort, info.order, {})
+        ic = IndexCode(name, info.sort, info.order, {}, within=info.within)
         for part in ("mem", "cls", "adm", "key", "bound"):
             e = eqs.get("ix_%s_%s" % (part, name))
             if e is None:

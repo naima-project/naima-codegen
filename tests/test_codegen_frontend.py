@@ -128,7 +128,7 @@ class LpsReader(unittest.TestCase):
     def test_linearisation_does_not_cluster(self):
         from naima_codegen.toolchain import LINEARISE
 
-        self.assertEqual(LINEARISE, ["mcrl22lps", "--lin-method=regular", "--no-constelm", "-n"])
+        self.assertEqual(LINEARISE, ["mcrl22lps", "--lin-method=regular", "--no-constelm", "-n", "-o"])
         ex = read_lps(_read(FIX / "jobqueue" / "lps.aterm"))
         self.assertFalse([s for s in ex.structs if s.startswith("Enum")])
         self.assertEqual(len(ex.summands), 6)  # the summands written in the example's core.mcrl2
@@ -155,7 +155,8 @@ class Accepted(unittest.TestCase):
         self.assertEqual((any_busy.pos, any_busy.op, any_busy.ret_pos), (0, "||", None))
         self.assertEqual(model.fun_maps["tick"], ((0,), 0))
         self.assertEqual(model.in_place["c_submit"], [("uses", ["bump"])])
-        self.assertNotIn("c_start", model.in_place)  # tick(tally, BUSY) is unfolded by the rewriter
+        # §3.2.3: without rewriting tick(tally, BUSY) stays a call, an in-place update
+        self.assertEqual(model.in_place["c_start"], [("tally", ["tick"])])
 
     def test_constructor_fields_bind_sum_variables_and_unions_are_arguments(self):
         # c_start(job(x, uses(x))): x is bound by projecting job's first field (§3.5.5);

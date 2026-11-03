@@ -190,8 +190,14 @@ Only the files of the backends the project table names are written (§3.6.9).
 Not implemented yet: `src/py.rs` (§3.11.4).
 
 3.1.3. Nothing under `<generated>` is edited by hand. Every generated file starts
-with a comment that says so and names `<generated>/MANIFEST.json`; §3.15 detects
-any edit.
+with a comment block, in the file's comment syntax, that says: the file is
+generated, by naima-codegen, from the model's `core.mcrl2`, `codegen.toml` and
+`policy.toml`, naming `MANIFEST.json` in the generated directory; that any edit is
+lost at the next generation and fails `naima-codegen generate --check` (§3.15);
+and what to do instead: change the model, check it, run `naima-codegen generate`,
+and commit the model and the generated directory together. §3.15 detects any edit;
+a project's build may run `generate --check` first and refuse to build while the
+generated directory differs from what the model generates.
 
 3.1.4. The generator reads no other file, no environment variable and no clock,
 so that the same inputs give the same outputs on every machine (§3.15.1). The
@@ -207,7 +213,7 @@ differs. Moving the pin is a commit that changes `codegen.toml` and regenerates.
 3.2.2. The LPS is produced by exactly
 
 ```sh
-mcrl22lps --lin-method=regular --no-constelm -n <input>.mcrl2 <input>.lps
+mcrl22lps --lin-method=regular --no-constelm -n -o <input>.mcrl2 <input>.lps
 lpspp --format=internal <input>.lps <input>.aterm
 ```
 
@@ -223,13 +229,22 @@ The generator reads only the `.aterm` file, a typed ATerm in which every
 variable and every operator carries its sort, so no sort is guessed. The
 pretty-printed form is never parsed.
 
-3.2.3. `--no-constelm` and `-n` are required. Without `--no-constelm`, `mcrl22lps`
+3.2.3. `--no-constelm`, `-n` and `-o` are required. Without `--no-constelm`, `mcrl22lps`
 replaces a parameter that no summand changes by its initial value. Checked on
 2026-10-06 with a Core whose worker count `W` was a parameter initialised to 2: the
 default run removed `W` and printed the condition `nrun < 2`, which would freeze a
-configuration value into the generated code. No other option is passed. Data
-rewriting stays on, so the generator reads the rewriter's normal forms, which are
-deterministic for a fixed toolset version.
+configuration value into the generated code.
+
+`-o` (`--no-rewrite`) is required too: the generator reads the terms as the model
+writes them, its own functions (`min`, `max`, a model's `monus`) called, not
+replaced by their rewritten bodies. The rewriter's normal form of `min(a, b)` is
+`if(a < b, a, b)`, which repeats each argument, so a summand whose equality-fixed
+variables feed each other (§3.5.5; the linearisation substitutes them) grew
+exponentially: on VoxLogicA's Core of 2026-10-25 one assignment of the memory
+reading's summand was 128,985 characters of Rust, its function's frame 1.9 MiB in
+a debug build, and every debug run overflowed the deciding thread's 2 MiB stack.
+Without rewriting the longest line of that crate is 8,459 characters. No other
+option is passed.
 
 3.2.4. The same two commands produce the refined LPS from
 `<generated>/model/core-refined.mcrl2` followed by `<model>/codegen-init.mcrl2`.
@@ -238,8 +253,10 @@ deterministic for a fixed toolset version.
 matter), the generated code gives such a parameter the default value of its sort
 (§3.10.2).
 
-3.2.6. Rewriter normal forms. Since data rewriting stays on (§3.2.3), a condition
-or a next-state assignment holds the rewriter's normal form of what the model wrote,
+3.2.6. Rewriter normal forms. With `-o` (§3.2.3) the linearisation does not rewrite,
+so the generator's own LPS holds the terms as the model wrote them; an LPS linearised
+with rewriting on (as before `-o`, or rewritten afterwards) holds instead, in a condition
+or a next-state assignment, the rewriter's normal form of what the model wrote,
 and the normal form of an accepted operator (§3.4.1) may use operators internal to
 the toolset's `Pos`, `Nat` and `Int`, whose names start with `@`. Found on
 2026-11-01: a model's `#(e |> l)` became `@succ_nat(#l)`, and `Int2Nat(o - 1)`, with
@@ -737,7 +754,8 @@ copied verbatim. It can therefore replace `<model>/core.mcrl2` in any system
    `pick(job(12))` from `{job(7), job(3), job(12)}`). For an index of order `least`
    or `key`, `first(I)` and `some(I)` are such searches over the ids
    `0 … bound − 1`, with the parameters the index reads passed as arguments; for an
-   index of order `newest` or `oldest`, they are walks over the index's list (3).
+   index of order `newest` or `oldest`, they are walks over the index's list (3); for an index of order `within` (4), walks over
+   the list of the index it is within.
 3. For every index of order `newest` or `oldest`, a parameter `ix_<name>: List(I)`,
    initially `[]`, holding the members in index order (newest first, or oldest
    first), and, in every summand that writes a parameter the index's predicate
@@ -763,6 +781,14 @@ copied verbatim. It can therefore replace `<model>/core.mcrl2` in any system
    possibly chained and under `if`, and `+ {x}`, `- {x}` on a set. A parameter read by
    such an index and written in any other way (by a walk, by a whole-set operation)
    is G13.
+
+4. For an index `I` of order `within`, `within = "J"`, no parameter: `first(I)` and
+   `some(I)` walk `ix_J`, the list of `J` (item 3), and stop at the first id at
+   which `I`'s membership predicate holds and its class is admitted. As `I`'s
+   predicate has `J`'s as a conjunct (§3.7.6), every member of `I` is in `ix_J`,
+   and the walk sees `I`'s members in `J`'s order. Nothing keeps a list for `I`,
+   so a summand may write what `I`'s predicate reads by any operation (by a walk,
+   by a whole-set operation): only `J`'s predicate is held to item 3.
 
 The refined summands are printed from the generator's internal form, with the
 recovered names of §3.5.3, in policy order for outputs and source order for inputs.
@@ -802,11 +828,13 @@ An index `[index.<name>]` declares:
   no walk. Whatever a local predicate reads changes at a known id when it changes,
   and only that id needs to be looked at again. A predicate that is not local is G9.
 - `order`: `least` (least id first), `key` (least value of the term `key` first, a
-  local term of an integer sort or of a list of one, ties by least id), `newest` (the
-  member that became a member most recently first) or `oldest` (the reverse). "Became
-  a member" is the moment the predicate turned true at that id; an id that stays a
-  member keeps its place, and ids that became members in the same summand are ordered
-  as §3.7.4 item 3 says.
+  local term of an integer sort or of a list of one; ties by least id; a key that is
+  not one column read at the member variable gives its sort in `key_sort`, `Nat` or
+  `Int`, else G9), `newest` (the member that became a member most recently first),
+  `oldest` (the reverse), or `within` (the order of the index named by `within`).
+  "Became a member" is the moment the predicate turned true at that id; an id that
+  stays a member keeps its place, and ids that became members in the same summand are
+  ordered as §3.7.4 item 3 says.
   A key that is a list is compared as mCRL2 compares lists with `<`: lexicographically,
   `[]` before every non-empty list, and two non-empty lists by their heads and, when
   the heads are equal, by their tails. A proper prefix of a list therefore comes before
@@ -814,6 +842,12 @@ An index `[index.<name>]` declares:
   and the TypeScript backend's arrays (§3.18.2) are ordered lexicographically with a
   proper prefix first, and a test compares the three orders with mCRL2's on seeded
   random pairs of lists that share prefixes.
+- `within`: given exactly when the order is `within`; the name of an index `J` of
+  the same sort and bound, of order `newest` or `oldest`, whose membership predicate
+  is a top-level conjunct of this index's (written first: `member = "<J's member>
+  && ..."`), so that every member of this index is a member of `J`. The members are
+  then ordered as in `J`: for `J` of order `newest`, the member that became a member
+  of `J` most recently first. Anything else is G9.
 - `class` and `admits`: optional, together. `class` is a local term of an
   enumeration sort `K`; `admits = { var = "k", when = "<Boolean term>" }` is a
   condition on the class `k` over scalar and table parameters only (no column).
@@ -891,6 +925,16 @@ Every right side of a summand's next-state assignments, and every action argumen
 is evaluated in the state before the summand fires, as in the LPS. The generated
 code writes in place only where that gives the same result; otherwise it evaluates
 into temporaries first. A function update `f[i -> v]` is a write of one array slot.
+A set or list whose new value is built from its old one (`S - {x}`, `S + T`, a walk
+that takes `S` as its accumulator, under `if`) is not copied: once every other right
+side of the summand that reads it has been evaluated, the old value is moved into the
+expression that builds the new one, along a path of `if` branches and consumed
+operands on which nothing reads it after the move (a right operand that reads it is
+evaluated first). A walk or map moves its own set and list arguments the same way.
+The set operations `+`, `-` and `*` of two owned sets update the larger one in place,
+so their cost is that of the smaller. A set whose old value is needed after the step
+(a parameter an index reads, whose dirty ids are its difference with the new value)
+is still copied; §3.13.1 counts that copy.
 
 #### 3.8.5 Errors during a step
 
@@ -1085,7 +1129,8 @@ checks join them.
    summand it recomputes each index from its definition (a scan of the ids below
    `bound`, and for `newest` and `oldest` the order kept beside it as a list, as
    §3.7.4 item 3 keeps it, the ids that entered in the summand in ascending order of
-   id) and compares it with the implementation, membership,
+   id, and for `within` that list of the index it is within, filtered by its
+   predicate) and compares it with the implementation, membership,
    order and class; and it checks that no id at or above `bound` is a member. A
    difference fails the test with the index, the event and the id. The Rust and
    TypeScript backends are compared with it after every event (§3.16.1), so they are
@@ -1151,6 +1196,14 @@ parameters of §3.2.5.
 | hash map | `K -> X`, other `K` | read, update `O(1)`, or `O(k)` when `K` holds lists (§3.13.1); never iterated; writing the default removes the key | `HashMap` with a fixed hasher (no random seed) | `dict` |
 | bitset | `FSet(I)`, `repr = "bitset"` | `in`, insert `+ {x}`, remove `- {x}`, `#`, `== {}`: `O(1)` | `Vec<u64>` and a count | `bytearray`, one byte per id, and a count |
 | ordered bitset | `FSet(I)` read by `least` (§3.7.6), `repr = "ordbitset"` | `in`, `#`, `== {}`: `O(1)`; insert, remove: `O(log F)`; `least`: `O(log F)` | the bitset and a `BTreeSet<u32>` of the members | the `bytearray` and a `heapq` of the members with lazy deletion (an id popped is discarded unless its byte is set), compacted when stale entries outnumber members |
+Until the whole rule is implemented, the generator applies one part of it to the
+Rust it emits: code of a summand (its acceptor and stepper functions) that copies
+a whole frontier set or list (a parameter of a set or list sort, not a column) or
+scans one (iterates it, or its difference with another) is G8, unless `cost_known`
+in the declaration (§3.6), a list of `"<summand>: <copy | scan> <parameter>"`,
+names it; an entry that no longer happens is G8 too, so the list only shrinks. The
+manifest lists each summand's entries under `cost`.
+
 | index | `[index.<name>]` of the policy (§3.7.6) | refresh at one id, `first`, `some`: `O(log F)` amortised, times the number of classes for `first` and `some` of a classed index; `F` the number of members | per index, a membership bitset (one bit per id); per class, a `BTreeSet` of `(order key, id)`, the order key being the id (`least`), the key's value (`key`) or the stamp, reversed for `newest`; for `newest` and `oldest`, a column of `u64` stamps and a run-level counter. Entries are deleted lazily: an entry is valid while its id is a member, of that class, with that key or stamp; invalid ones are dropped when they reach the front, and the set is rebuilt from its valid entries when invalid ones outnumber them | the same with `heapq` per class and `array('Q')` stamps |
 | hash set | `FSet(X)`, default | `in`, insert, remove, `#`, `== {}`: `O(1)`; `+ - * <=` of two sets: `O(k)`, only on per-id sets | `HashSet` with a fixed hasher | `set` |
 | bag | `FBag(X)` | `count`, add one, remove one: `O(1)` | `HashMap<X, u32>` | `dict` |
@@ -1223,6 +1276,78 @@ summands make them and, within one summand, in ascending order of id (§3.8.3), 
 every backend follows. This is what lets the backends,
 with different hash functions, take the same actions.
 
+#### 3.10.6 Sorted per-id lists
+
+A model may keep, per id, a list of ids as a set ordered by id: it starts empty and
+grows only through an *ordered insert*, a user map whose equations are exactly
+
+    f(u, []) = [u];
+    f(u, n |> l) = if(u == n, n |> l, if(p(u) < p(n), u |> (n |> l), n |> f(u, l)));
+
+(`p` the one field of the id sort, §3.3.3), or an *ordered merge* through it:
+
+    g([], l2) = l2;
+    g(n |> l, l2) = g(l, f(n, l2));
+
+The generator recognises both from their equations (variable names aside). A column
+`P: I -> List(I)` is *sorted* when its initial value is the constant `[]` and the new
+value every summand gives it is, on each path of its `if`s, `P` itself, `P` with one
+entry `k` updated to `f(u, P(k))` or `g(l, P(k))`, or a call of a *sorted walk* with `P`
+at its function-sorted result's position and nowhere else. A sorted walk (§3.4.8) is
+one whose every step leaves that parameter in the same form, and which is called
+nowhere but there. These conditions are a greatest fixpoint, taken over the summands
+of the Core and of the stepper Core. By induction on the run, every value of a sorted
+column is sorted by id, and on a sorted list `f(u, l)` is `l` with `u` at the place a
+binary search finds (unchanged when `u` is in it).
+
+The Rust backend applies such an update in place: the summand's other new values are
+computed first (all of them that read the column, which must not include a set or
+list moved or changed in place, §3.8.4), then the entry is changed by a binary search
+and an insert (`O(log k)` to find the place, and an append when the id is the
+greatest, as it is when ids are made in increasing order), and a sorted walk is given
+the column itself. The walk the model defines (`O(k)`, and a copy of the list) is
+emitted too and is used everywhere else.
+
+The Python backend, whose lists are tuples, finds the place by a binary search and
+builds the new tuple by slicing (a copy, made by the interpreter rather than by a walk
+of the list). In the oracle's audit mode (§3.9.9) every such insert and merge is also
+computed by the model's walk, and a difference is an audit failure, so the
+cross-check of §3.16 compares the Rust code with the model's own definition.
+
+#### 3.10.7 Lists kept sorted by a key, and list entries changed in place
+
+A list column may instead be kept in the order of a key function `F: I -> Nat` (a
+loop's pending elements in element order): it grows through an *insert ordered by a
+key*, a user map whose equations are exactly
+
+    f(u, [], F) = [u];
+    f(u, n |> l, F) = if(F(u) < F(n), u |> (n |> l), n |> f(u, l, F));
+
+which puts `u` after every element whose key is not greater. That the column stays
+sorted by `F` depends on `F` not changing for the elements in it, which the generator
+cannot see in the summands; the declaration states it, `key_sorted = { P = "F" }`
+(column to key function, both parameters), and the model's own properties are where
+it is checked. A summand's new value `P[k -> f(u, P(k), F)]`, with `F` a parameter
+the summand does not write, is then applied in place by a binary search and an
+insert. (A check of the whole entry's order at each insert would make debug builds
+quadratic again; the cross-check of §3.16 compares the result with the Python
+backend, which evaluates the model's walk.)
+
+Two more updates of one entry of a list column are applied in place on any list
+column that no index reads, without a declaration: `P[k -> tail(P(k))]` (the first
+element removed) and `P[k -> r(P(k), u)]` with `r` a *first-occurrence removal*,
+
+    r([], u) = [];
+    r(n |> l, u) = if(n == u, l, n |> r(l, u));
+
+A summand's in-place list updates are applied after every other new value, so each
+reads the old state; an entry left equal to the column's default is dropped, as a
+write of it would be, so that the state's encoding does not depend on the path. The tests `F(y) == []`, `tail(F(y)) == []` and
+`r(F(y), u) == []` read the entry in place instead of copying it. Each of these
+replaces a copy of the whole entry (`O(k)` per firing, quadratic over a list's life)
+with an `O(log k)` search, or a shift of the elements after the place changed.
+The Python backend evaluates the model's walks.
+
 ### 3.11 The Rust backend
 
 #### 3.11.1 The crate
@@ -1293,6 +1418,38 @@ PyO3's borrow check instead of racing.
 
 Not implemented yet: the binding. The tests of §3.16 compile the crate with a small
 native driver instead (§3.16.5).
+
+#### 3.11.5 Stored functions
+
+A function-sorted parameter is a `Fun<K, V>`: its default and the entries that differ
+from it. The entries at a key of an id sort (§3.3.3) are held in a vector indexed by the
+id, those at any other key in a map ordered by key; the trait `FunKey` says which (an id
+type's `dense` is its index). An id's entry then costs the size of `V` (a map's entry
+costs the key, the value and the map's own nodes, several times that), and reading or
+writing it is an index, not a search: the columns of a model whose ids number in the
+millions (VoxLogicA's deciding part: 78 columns over nodes, 1.49 KB a node as maps)
+stay within a few hundred bytes an id. Two functions are equal when their defaults and
+their entries differing from the default are; the state's encoding (§3.16) lists those
+entries in key order, as before.
+
+#### 3.11.6 The firing hook
+
+An embedding that watches the stepper from another thread (a stall monitor, a
+diagnostic dump) can learn which output summand a long step is in. The crate has a
+feature `firing`, off by default. It always exports `OUTPUT_LABELS`, the output
+summands' names in policy order (§3.8.3), and `firing() -> Option<&'static str>`.
+With the feature on, it also exports `FIRING`, a process-wide `AtomicU32`, and each
+output summand, once its condition holds and before its action and next state are
+computed, stores its index in `OUTPUT_LABELS` plus one into `FIRING`: one relaxed
+store, no allocation. `firing()` reads that slot and gives the label of the summand
+fired last; it gives `None` before the first fire and always without the feature.
+Without the feature, the code compiles to exactly what it was before: the hook costs
+nothing when unused.
+
+The slot is written, never read, by the generated code, so it changes no behaviour,
+no state and no action: §3.8.6 and §3.8.7 hold as before (a relaxed store is not a
+lock and waits for nothing). The slot is shared by every state in the process; an
+embedding that steps several states at once reads the last fire of any of them.
 
 ### 3.12 The Python backend
 
@@ -1441,7 +1598,15 @@ for a bitset), and 8 bytes per id for each `newest` or `oldest` index's stamps. 
 limit in bytes per id, which G11 enforces on the columns, and its measurement on a
 large run are the project's.
 
-Not implemented yet: the layout (the manifest's `layout` is null), the limit and G11.
+The layout is computed from the representations of §3.10.3, whatever the backends
+emit today: a column takes one value of its sort at its width (§3.6.6; a column of `Bool`
+is a bitset, one bit per id, listed under `bit_columns`; an enumeration one byte, an id sort `u32`, a record the sum of its fields, a union a tag
+byte and its largest constructor), a column of lists or sets eight bytes (start and
+length) plus the entries' bytes, listed under `entries`; bits are rounded up to whole
+bytes. The manifest's `layout` has a table per backend (the same today) and per id sort:
+`columns`, `entries`, `index_bits`, `stamps` and the total `bytes`. The project's limit
+is `bytes_per_id` in the declaration, a table of id sorts to bytes; a total over it is
+G11.
 
 #### 3.13.5 Generation time
 
@@ -1473,7 +1638,7 @@ succeeded, so on any error `<generated>` is left as it was.
 | G10 | a construction assertion failed (§3.9.1): a defect of the generator |
 | G11 | the per-id layout exceeds the project's limit (§3.13.4) |
 | G12 | a sort outside §3.3, or an action argument of a sort outside §3.5.7 |
-| G13 | a `newest` or `oldest` index reads a parameter that some summand writes other than at ids visible in its assignments (§3.7.4 item 3) |
+| G13 | a `newest` or `oldest` index (not a `within` one) reads a parameter that some summand writes other than at ids visible in its assignments (§3.7.4 item 3) |
 
 Not implemented yet: G8 other than the one on two in-place updates (§3.4.8), and G11.
 
