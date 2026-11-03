@@ -1,0 +1,71 @@
+% core.mcrl2 -- tasks that wait on each other, written as one linear process
+% (docs/spec.md §3.5): every summand is  condition -> c_<label>(args) . Core(assignments).
+%
+% A client opens tasks, numbered in opening order, each with a label from 0 to 3. A
+% queued task starts at once; a running task finishes, or needs another live task and
+% waits until that one is done. A done task tells its waiters one at a time, the oldest
+% first, and a waiter whose needs are all told is queued again. Queued tasks start
+% in the order of their rank, a list of numbers. A done task that nobody waits on is
+% dropped, and its label can be opened again. Inputs come from the environment
+% (open, need, finish, finish2); outputs are the scheduler's decisions (tell, drop,
+% start). Each summand follows a tag line, %@input or %@order <level>.
+%
+% What it shows of the generator: a per-id list appended at the end and drained
+% from the front (waiters, repr adj-append, §3.10.3), an index ordered by a list
+% (rank, §3.7.6), a map keyed by a record that holds a list (made, §3.13.1), indexes
+% that two tasks enter in one summand (finish2, §3.7.4), and terms the rewriter
+% writes with its own operators of numbers (depth, §3.2.6).
+
+sort Task = struct task(tx: Nat);                      % the id sort
+sort Phase = struct Free | Queued | Running | Waiting | Done;
+     Val = struct vl(va: Nat, vb: Nat);
+     Key = struct key(kn: Nat, kv: List(Val));         % what a label stands for
+
+map  keyof: Nat -> Key;                                % the key of a label
+     rankof: Nat # Nat -> List(Nat);                   % the rank of task t opened with label k
+var  k, t: Nat;
+eqn  keyof(k) = key(k mod 2, if(k < 2, [], [vl(k, k div 2)]));
+     rankof(k, t) = if(k < 2, [k], [k mod 2, t]);
+
+act  c_open: Nat;
+     c_need, c_finish2, c_tell: Task # Task;
+     c_finish, c_start, c_drop: Task;
+
+proc Core(
+       cap: Nat,                     % configuration: tasks at most
+       nt: Nat,                      % tasks opened so far
+       label: Task -> Nat,
+       st: Task -> Phase,
+       rank: Task -> List(Nat),      % the start order: least first, a prefix before its extensions
+       waiters: Task -> List(Task),  % the tasks to tell when it is done, oldest first
+       missing: Task -> Nat,         % the tasks it waits for
+       made: Key -> Nat,             % the task opened with a key, its number plus one; 0 for none
+       depth: Nat) =                 % the longest wait list a task has told
+% ---- inputs: the client and the tasks
+%@input
+    sum k: Nat . (k < 4 && nt < cap && made(keyof(k)) == 0) ->
+      c_open(k) . Core(nt = nt + 1, label = label[task(nt) -> k], st = st[task(nt) -> Queued],
+                       rank = rank[task(nt) -> rankof(k, nt)], made = made[keyof(k) -> nt + 1])
+%@input
+  + sum x, y: Task . (st(x) == Running && x != y && tx(y) < nt && st(y) != Free) ->
+      c_need(x, y) . Core(st = st[x -> Waiting], missing = missing[x -> missing(x) + 1],
+                          waiters = waiters[y -> waiters(y) <| x])
+%@input
+  + sum x: Task . (st(x) == Running) ->
+      c_finish(x) . Core(st = st[x -> Done])
+%@input
+  + sum x, y: Task . (st(x) == Running && st(y) == Running && tx(x) < tx(y)) ->
+      c_finish2(x, y) . Core(st = st[x -> Done][y -> Done])
+% ---- outputs: telling, dropping, starting
+%@order 1
+  + sum x, v: Task . (st(x) == Done && waiters(x) != [] && v == head(waiters(x))) ->
+      c_tell(v, x) . Core(waiters = waiters[x -> tail(waiters(x))], missing = missing[v -> Int2Nat(missing(v) - 1)],
+                          st = if(missing(v) == 1, st[v -> Queued], st), depth = max(depth, #(v |> tail(waiters(x)))))
+%@order 2
+  + sum x: Task . (st(x) == Done && waiters(x) == []) ->
+      c_drop(x) . Core(st = st[x -> Free], made = made[keyof(label(x)) -> 0], rank = rank[x -> []], label = label[x -> 0])
+%@order 3
+  + sum x: Task . (st(x) == Queued) ->
+      c_start(x) . Core(st = st[x -> Running])
+%@observers
+  + delta;

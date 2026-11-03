@@ -1,0 +1,145 @@
+{
+  "files": {
+    "model/core-probe.mcrl2": "b285e7b93e06cf4e96908a6c4d65b9b419c499a9df9a3bb0e009a1682caf3d4f",
+    "model/core-refined.mcrl2": "7f94945d8b0faee6c3d57296e78b1a51b547a246789827c313af5275aaff6c35",
+    "model/probe.mcf": "0e2816ad4cb6013b3f095ad0a750db86f2709bad2a888ec75b84066164876c62",
+    "model/systems/small-model.mcrl2": "df46d426d39eaf093fb935984b1f2c0e45e9a797dfe810eb6076d8867a96c91b",
+    "model/systems/small-probe.mcrl2": "c14557e31714b87915b2ba311340054d01af3cc45d8c37ab7525761c83dfeacc",
+    "model/systems/small-refined.mcrl2": "216b203c2e702f4696f6ca2f469478d882c5533aceb6c5eb8eeeee563100c5eb",
+    "python/waits/__init__.py": "bb72e7a7e4e24761185443fbbf7f74da6e95de3d087da24302e58703f8e57cce",
+    "rust/waits/Cargo.toml": "00dc94e9b760862e29a54927ba04cfb5e41657dce4e4cf285a2ee571adaae982",
+    "rust/waits/src/lib.rs": "9bc1b48abbcec2e1016e70efd48368ee103b53537f395628d08170474aad52f8",
+    "typescript/waits/waits.svelte.ts": "ee8c72a3817c08cc895f04485b5e80a4496c78b4f33d7490976a756c62460c43",
+    "typescript/waits/waits.ts": "1663838a54dbf852c42707bf7f8e6c1fd5e134060b5a3919d676f479bca03ff9"
+  },
+  "generator": {
+    "naima-codegen": "5d2d02cc462dabbf463b4e67f2f3f3ab927491625a7ed1661492b376d181188b",
+    "naima_codegen/__init__.py": "47f989f1fcdec27178005b515d46628a31d15cad8e4aac4dcecd1c5d13ad1723",
+    "naima_codegen/__main__.py": "91a1938b6924036e98a7032ef2188a78fb6467ab6df6876b40443836ea26099d",
+    "naima_codegen/aterm.py": "c412a1cdb5cf139db51e89bcea35f756ac2103b68b25c683254448b358d4018f",
+    "naima_codegen/checks.py": "9e912229d0517842805331b8fe4c56fbc0d0633c21ccbb413db986ab93543508",
+    "naima_codegen/cli.py": "f5ebe5482a172812011f6cd60ab9688d5ec14bc174c9532090767ac8ee6d0542",
+    "naima_codegen/config.py": "39f3029f67cb83e72f15c95f1a4b691e99122c7787558315c4f6f45e83b9efe6",
+    "naima_codegen/errors.py": "d567bb7bde05acb085aa0867ffbb56b7f2ccddc7aab2eb82357099724b9c4eca",
+    "naima_codegen/evaluate.py": "6bff0cf0c273062497f75bc78aea9ffe1abe0f84a3754549bb49b31e9446b0e0",
+    "naima_codegen/expr.py": "e7a2324e0470cd5a12569c5fc601341cda3ae09c3a8cc7420122461949985e8a",
+    "naima_codegen/frontend.py": "d29d15e7acd70bb73c0bf3eb097fc250647503275d636463a1a8cd4214114e68",
+    "naima_codegen/functions.py": "8cf8fbb9aea0544aaf49724e465b354de90d6b3fda018a5dd8b912c849252c3d",
+    "naima_codegen/header.py": "c545202fc26a6a400591064480be77b3df5855ee88ab36b450bd9e053bfd4493",
+    "naima_codegen/lower.py": "c9640c8c29359ca27b3577663380a00ab5dbac1649e1d1920b7be9f80c12c3e8",
+    "naima_codegen/lps.py": "4136574b761d57db2bf5d7a57911142651410d60843068abb5c66f07b11b5746",
+    "naima_codegen/outputs.py": "d99a4a5ab11aac7829bbf5c8f5e5a07f281d8a861d27ebb18d027b791793575d",
+    "naima_codegen/policy.py": "b8b0138c3710723263ad85f0837c30c939cc5993707977e0590ff6a37bff4314",
+    "naima_codegen/project.py": "337a0f52400055c90b560625a603b0178604ef64749c6e288f2a0016372f0a40",
+    "naima_codegen/pyback.py": "24cfbf5397900d475500376fc3163151e0177a2305e0e2e409097ada895d5da0",
+    "naima_codegen/refine.py": "86cba1c9776323334b128608847e49bce3833a9d4148c4ed68ab36ed3187a065",
+    "naima_codegen/render.py": "8a5f47bd336590430275ece48c3c09e3a5f79c88e4bac24d5ca44e910bf1efff",
+    "naima_codegen/rustback.py": "c00f6d1e31132dfc96fa864b6d1a35e1acdda16ab741ee623c27367430dbb725",
+    "naima_codegen/source.py": "df13d79547280ceda93475354652579263db29153abe01c54441b6bc4f8501d2",
+    "naima_codegen/stepper.py": "ed30ba25f3c2e92cf7bc362f70637bd1bf4752b7da7a4a5f5539664a4ba3eec2",
+    "naima_codegen/systems.py": "641e10ccb7090dd126af819923466d95285d83182f5fe971f0b67d352b64b080",
+    "naima_codegen/toolchain.py": "a2891d2a9eb57f476ecb80b8dd5384653e35898d2f1d078155f8c1f5fd0d8b15",
+    "naima_codegen/tsback.py": "54379d604fdd516dfbcd50c18df759693dfbb558121abe2c704ff29c018df925"
+  },
+  "inputs": {
+    "codegen.toml": "2a5ce9e07699962a2c09072da22c2cabe6ebe91c997783fb53e707c5e00bc383",
+    "model/codegen-init.mcrl2": "f5a0c80a6ceb9fd864509479ba5497e159233ae9fbdc1e4c8b7a223894563757",
+    "model/core.mcrl2": "2d8d7303682235b3daadc3dc7e7d37c97dc0aa08936630caecbcc0bd34bd9b14",
+    "model/env.mcrl2": "ec08cdaf12eb0c05686204a6be7dbc2f54a0c5a5015f810ea521cc1378f888ad",
+    "model/instances/three.mcrl2": "e7122217f1c7b8dcaeee829ba3a3a433bf266db489ee1279d5abf2dc6f759de8",
+    "model/instances/two.mcrl2": "50ec82c153f62887c86af252c286091e4b0856e7d73cf8c74342370994dc3f57",
+    "model/observers.mcrl2": "93e3befc4ee11a8ef89d01a45a040b2794e8990bcd68072a9393595575b39947",
+    "model/policy.toml": "bfca14850e953daf2af67a30cd3a46f14e7d352c2ed983cac5b9a2b988c0c3d2"
+  },
+  "layout": null,
+  "stepper": {
+    "deferred": [],
+    "indexes": [
+      {
+        "classes": [],
+        "name": "telling",
+        "order": "oldest",
+        "reads": [
+          "st",
+          "waiters"
+        ],
+        "sort": "Task"
+      },
+      {
+        "classes": [],
+        "name": "droppable",
+        "order": "newest",
+        "reads": [
+          "st",
+          "waiters"
+        ],
+        "sort": "Task"
+      },
+      {
+        "classes": [],
+        "name": "queue",
+        "order": "key",
+        "reads": [
+          "st",
+          "rank"
+        ],
+        "sort": "Task"
+      }
+    ]
+  },
+  "summands": [
+    {
+      "cost": null,
+      "kind": "input",
+      "name": "c_open",
+      "policy": null
+    },
+    {
+      "cost": null,
+      "kind": "input",
+      "name": "c_need",
+      "policy": null
+    },
+    {
+      "cost": null,
+      "kind": "input",
+      "name": "c_finish",
+      "policy": null
+    },
+    {
+      "cost": null,
+      "kind": "input",
+      "name": "c_finish2",
+      "policy": null
+    },
+    {
+      "cost": null,
+      "kind": "output",
+      "name": "c_tell",
+      "policy": 0
+    },
+    {
+      "cost": null,
+      "kind": "output",
+      "name": "c_drop",
+      "policy": 1
+    },
+    {
+      "cost": null,
+      "kind": "output",
+      "name": "c_start",
+      "policy": 2
+    }
+  ],
+  "systems": [
+    {
+      "group": "small",
+      "instances": [
+        "three",
+        "two"
+      ]
+    }
+  ],
+  "toolset": "202607.0",
+  "walks": []
+}

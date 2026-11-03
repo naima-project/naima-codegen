@@ -238,6 +238,44 @@ deterministic for a fixed toolset version.
 matter), the generated code gives such a parameter the default value of its sort
 (§3.10.2).
 
+3.2.6. Rewriter normal forms. Since data rewriting stays on (§3.2.3), a condition
+or a next-state assignment holds the rewriter's normal form of what the model wrote,
+and the normal form of an accepted operator (§3.4.1) may use operators internal to
+the toolset's `Pos`, `Nat` and `Int`, whose names start with `@`. Found on
+2026-11-01: a model's `#(e |> l)` became `@succ_nat(#l)`, and `Int2Nat(o - 1)`, with
+`o` a term the generator substituted for a sum variable, became `@natpred(…)`.
+Besides the constructors of numbers (`@c0`, `@c1`, `@cNat`, `@cInt`, `@cNeg` and the
+machine digits, which the generator reads as numerals), the generator accepts and
+translates in every backend exactly these:
+
+| operator | sort | value |
+|---|---|---|
+| `@succ_nat(n)` | `Nat -> Nat` | `n + 1` |
+| `@succ_pos(p)` | `Pos -> Pos` | `p + 1` |
+| `@natpred(n)` | `Nat -> Nat` | `n - 1`, and `0` for `0` |
+| `@pospred(p)` | `Pos -> Pos` | `p - 1`, and `1` for `1` |
+| `@monus(m, n)` | `Nat # Nat -> Nat` | `m ∸ n`, that is `max(0, m - n)` |
+| `@equals_zero(n)` | `Nat -> Bool` | `n == 0` |
+| `@equals_one(x)` | `Nat -> Bool`, `Pos -> Bool` | `x == 1` |
+
+The list is the result of an audit of mCRL2 202607.0, the pin: an internal operator
+can be left in a normal form only where the right side of an equation of these sorts
+introduces it over variables, since an equation that matches on digits applies only
+to numerals, which the rewriter computes away. The right sides that do are those of
+`succ`, `pred`, `-`, `Pos2Nat`, `+`, `==`, `<` and `<=`, and they introduce
+the seven operators above. The others of these sorts (`@add_with_carry`, `@plus_nat`,
+`@times_ordered`, `@times_overflow`, `@divmod_aux`, `@div_bold`, `@first`, `@last`,
+`@msd`, `@div2`, `@is_odd`, `@exp_*`, `@sqrt_*`, `@swap_zero*`, `@monus_whr`,
+`@pred_whr`, `@not_equals_zero`) apply only to digits, appear only in the condition of
+an equation, or come from operators outside §3.4.1 (`exp`, `sqrt`). Checked on
+2026-11-01 by linearising 1,360 accepted expressions over variables of the three
+sorts (comparisons, conversions, arithmetic, `#` and `.`, with `succ` forms on either
+side): their normal forms used the seven operators and the constructors, and nothing
+else. A test linearises such expressions and requires every backend to compute the
+values the rewriter computes (§3.16.8). Moving the pin repeats the audit. Any other
+internal operator in a summand is refused as outside the subset (G3) by the front
+end, and as a defect (G10) by a backend.
+
 ### 3.3 The accepted subset: sorts
 
 3.3.1. `Bool`, `Pos`, `Nat` and `Int` are accepted. `Real` is refused: the generated
@@ -292,7 +330,8 @@ conversions `Int2Nat`, `Nat2Pos`, `Pos2Nat`, `Nat2Int`; on lists `[]`, `|>`, `<|
 `+`, `-`, `*`, `in`, `#`, `<=`; on finite bags `{}`, `count`, `+`, `-`; function
 application and update `f[x -> v]`; constructors, projections and recognisers of
 structured sorts. Whether an operator is allowed in a given place depends on its
-cost class there (§3.13.1).
+cost class there (§3.13.1). The normal forms the rewriter gives these operators are
+accepted with them (§3.2.6).
 
 3.4.2. A user map (declared in `<model>/core.mcrl2`, not from the catalogue) must
 satisfy all of the following.
@@ -701,14 +740,29 @@ copied verbatim. It can therefore replace `<model>/core.mcrl2` in any system
    index of order `newest` or `oldest`, they are walks over the index's list (3).
 3. For every index of order `newest` or `oldest`, a parameter `ix_<name>: List(I)`,
    initially `[]`, holding the members in index order (newest first, or oldest
-   first), and, in every summand that writes a parameter the index's predicate or
-   class reads, the assignment that keeps it. For each id `y` the summand writes,
-   with `a` the membership of `y` before and `b` after the summand, it is
-   `ix_<name> = if(b && !a, <insert y>, if(a && !b, <remove y>, ix_<name>))`,
-   with insertion at the front (`newest`) or at the end (`oldest`). The ids a summand
-   writes must be visible in its assignments: function updates `f[x -> v]`, possibly
-   under `if`, and `+ {x}`, `- {x}` on a set. A parameter read by such an index and
-   written in any other way (by a walk, by a whole-set operation) is G13.
+   first), and, in every summand that writes a parameter the index's predicate
+   reads, the assignment that keeps it. Let `y1 … yn` be the ids the summand writes
+   in those parameters (`n ≥ 1`, each written once in the list however often the
+   summand writes it), and `ak`, `bk` the membership of `yk` before and after the
+   summand. The assignment is
+
+   ```
+   ix_<name> = ix_ins_<name>(ix_out_<name>(ix_<name>, OUT), IN, 0)
+   OUT = if(a1 && !b1, {y1}, {}) + … + if(an && !bn, {yn}, {})
+   IN  = if(b1 && !a1, {y1}, {}) + … + if(bn && !an, {yn}, {})
+   ```
+
+   `ix_out_<name>` removes from the list the ids of `OUT`, and `ix_ins_<name>`
+   inserts the ids of `IN` one at a time in ascending order of their field (searching
+   `c(i)` for `i = 0, 1, …`, with conditional equations as in item 2), each at the end
+   (`oldest`) or at the front (`newest`). So when several ids become members in one
+   summand they enter in ascending order of id: in an `oldest` index the least comes
+   first among them, in a `newest` index the greatest, as if each entered after the
+   ids below it. The stamps of the code follow the same order (§3.8.3). The ids a
+   summand writes must be visible in its assignments: function updates `f[x -> v]`,
+   possibly chained and under `if`, and `+ {x}`, `- {x}` on a set. A parameter read by
+   such an index and written in any other way (by a walk, by a whole-set operation)
+   is G13.
 
 The refined summands are printed from the generator's internal form, with the
 recovered names of §3.5.3, in policy order for outputs and source order for inputs.
@@ -748,10 +802,18 @@ An index `[index.<name>]` declares:
   no walk. Whatever a local predicate reads changes at a known id when it changes,
   and only that id needs to be looked at again. A predicate that is not local is G9.
 - `order`: `least` (least id first), `key` (least value of the term `key` first, a
-  local term of an integer sort, ties by least id), `newest` (the member that became
-  a member most recently first) or `oldest` (the reverse). "Became a member" is the
-  moment the predicate turned true at that id; an id that stays a member keeps its
-  place.
+  local term of an integer sort or of a list of one, ties by least id), `newest` (the
+  member that became a member most recently first) or `oldest` (the reverse). "Became
+  a member" is the moment the predicate turned true at that id; an id that stays a
+  member keeps its place, and ids that became members in the same summand are ordered
+  as §3.7.4 item 3 says.
+  A key that is a list is compared as mCRL2 compares lists with `<`: lexicographically,
+  `[]` before every non-empty list, and two non-empty lists by their heads and, when
+  the heads are equal, by their tails. A proper prefix of a list therefore comes before
+  it (`[1] < [1, 0] < [2]`). The backends compare alike: a Rust `Vec`, a Python tuple
+  and the TypeScript backend's arrays (§3.18.2) are ordered lexicographically with a
+  proper prefix first, and a test compares the three orders with mCRL2's on seeded
+  random pairs of lists that share prefixes.
 - `class` and `admits`: optional, together. `class` is a local term of an
   enumeration sort `K`; `admits = { var = "k", when = "<Boolean term>" }` is a
   condition on the class `k` over scalar and table parameters only (no column).
@@ -815,11 +877,13 @@ index's predicate, class or key reads records the ids it writes (a function upda
 id, a set's inserted or removed element, each id a compiled walk writes) in a
 per-step list of dirty ids. Once all the summand's assignments are done (§3.8.4), the
 predicate, class and key of each affected index are evaluated at each dirty id in the
-new state, and the index is updated where they changed. So every condition, and every
-`first` and `some` in it, reads indexes that match the state, as the reference
-definitions of §3.7.4 do. A `newest` or `oldest` index records the entry moment as a
-stamp, a 64-bit counter of entries taken from the state (§3.10.3); an id that stays a
-member keeps its stamp, including across a change of class.
+new state, in ascending order of id and once per id, and the index is updated where
+they changed. So every condition, and every `first` and `some` in it, reads indexes
+that match the state, as the reference definitions of §3.7.4 do. A `newest` or
+`oldest` index records the entry moment as a stamp, a 64-bit counter of entries taken
+from the state (§3.10.3); an id that stays a member keeps its stamp, including across
+a change of class. Since the dirty ids are visited in ascending order, ids that become
+members in one summand take ascending stamps, which is the order of §3.7.4 item 3.
 
 #### 3.8.4 Simultaneous assignment
 
@@ -1020,7 +1084,8 @@ checks join them.
    (`State(config, out, audit=True)`), used by the tests of §3.16 and never by a run. After every
    summand it recomputes each index from its definition (a scan of the ids below
    `bound`, and for `newest` and `oldest` the order kept beside it as a list, as
-   §3.7.4 item 3 keeps it) and compares it with the implementation, membership,
+   §3.7.4 item 3 keeps it, the ids that entered in the summand in ascending order of
+   id) and compares it with the implementation, membership,
    order and class; and it checks that no id at or above `bound` is a member. A
    difference fails the test with the index, the event and the id. The Rust and
    TypeScript backends are compared with it after every event (§3.16.1), so they are
@@ -1060,7 +1125,9 @@ no `reference.mcrl2` and nothing for G7 to compare. User maps, walks included
 (§3.4.8), are never catalogue entries: the generator compiles them.
 
 Not implemented yet: `ops.toml`, the hand-written implementations and the
-conformance tests. The generator reads `reference.mcrl2` only, for the check G7.
+conformance tests, except the conformance test of the per-id growing list (§3.10.3),
+whose Rust implementation is part of the generated crate's runtime. The generator
+reads `reference.mcrl2` only, for the check G7.
 
 #### 3.10.2 Default values
 
@@ -1081,7 +1148,7 @@ parameters of §3.2.5.
 | id | id sort | `O(1)` | `u32` newtype | `int` |
 | column | `I -> X`, `X` scalar or record | read `O(1)`; update `O(1)` amortised | `Vec<X>` per field, grown to the largest id written, filled with the default; a read beyond the end gives the default | `array.array` of the width's type code (`B H I Q i q`), grown by doubling |
 | table | `E -> X`, `E` an enumeration | `O(1)` | fixed-size array | `list` of fixed length |
-| hash map | `K -> X`, other `K` | read, update `O(1)`; never iterated; writing the default removes the key | `HashMap` with a fixed hasher (no random seed) | `dict` |
+| hash map | `K -> X`, other `K` | read, update `O(1)`, or `O(k)` when `K` holds lists (§3.13.1); never iterated; writing the default removes the key | `HashMap` with a fixed hasher (no random seed) | `dict` |
 | bitset | `FSet(I)`, `repr = "bitset"` | `in`, insert `+ {x}`, remove `- {x}`, `#`, `== {}`: `O(1)` | `Vec<u64>` and a count | `bytearray`, one byte per id, and a count |
 | ordered bitset | `FSet(I)` read by `least` (§3.7.6), `repr = "ordbitset"` | `in`, `#`, `== {}`: `O(1)`; insert, remove: `O(log F)`; `least`: `O(log F)` | the bitset and a `BTreeSet<u32>` of the members | the `bytearray` and a `heapq` of the members with lazy deletion (an id popped is discarded unless its byte is set), compacted when stale entries outnumber members |
 | index | `[index.<name>]` of the policy (§3.7.6) | refresh at one id, `first`, `some`: `O(log F)` amortised, times the number of classes for `first` and `some` of a classed index; `F` the number of members | per index, a membership bitset (one bit per id); per class, a `BTreeSet` of `(order key, id)`, the order key being the id (`least`), the key's value (`key`) or the stamp, reversed for `newest`; for `newest` and `oldest`, a column of `u64` stamps and a run-level counter. Entries are deleted lazily: an entry is valid while its id is a member, of that class, with that key or stamp; invalid ones are dropped when they reach the front, and the set is rebuilt from its valid entries when invalid ones outnumber them | the same with `heapq` per class and `array('Q')` stamps |
@@ -1090,9 +1157,23 @@ parameters of §3.2.5.
 | stack | `List(X)` used only with `[] \|> head tail # == []` | `O(1)` | `Vec`, top at the end | `list`, top at the end |
 | queue | `List(X)` used with `<\|` | `[] <\| \|> head tail rhead rtail # == []`: `O(1)` | `VecDeque` | `collections.deque` |
 | per-id list, fixed | column of `List(I)`, `repr = "adj-fixed"`, written once per id | write `O(k)`; iterate, `#`, `in`, `.`: `O(k)` | one shared `Vec<u32>` and, per id, start and length (`u32` each) | the same in `array('I')` |
-| per-id list, growing | column of `List(I)` or `FSet(I)`, `repr = "adj-append"` | append `O(1)` (for a set, insert-if-absent `O(k)`); iterate, `#`, `in`: `O(k)` | shared pool of (value, next) pairs, per id head, tail and length | the same in `array('I')` |
+| per-id list, growing | column of `List(I)` or `FSet(I)`, `repr = "adj-append"` | append `f[i -> f(i) <\| e]`, drain `f[i -> tail(f(i))]`, `head(f(i))`, `f(i) == []`, `#f(i)`: `O(1)` (for a set, insert-if-absent `O(k)`); iterate, `in`, any other read of `f(i)` (a copy of the list) and any other write of `f(i)`: `O(k)` | one pool of (value, next) cells shared by the ids, a free list of the cells that drains and writes released, and per id its first cell, last cell and length | the same in `array('I')` |
 | priority queue | catalogue sort `PQueue` of `e(prio: Int, seq: Nat, id: I)`, larger `prio` first, then larger `seq` | `pq_push`, `pq_pop`: `O(log F)`; `pq_top`, `pq_isempty`, `pq_size`: `O(1)`; `pq_remove(q, id)`: `O(log F)` amortised (lazy deletion) | `BinaryHeap<(i64, u64, u32)>` | `heapq` on `(-prio, -seq, id)` |
 | ordered set | catalogue sort `OrdSet` of `o(key: Nat, id: I)`, least first | `os_insert`, `os_remove`, `os_min`: `O(log F)`; `os_member`, `os_size`: `O(1)` | `BTreeSet<(u64, u32)>` and a count | `heapq` with lazy deletion and a membership `set` |
+
+A per-id growing list is a queue per id, such as the evaluations waiting on one:
+appended at the end, drained from the front one element per summand, and read at
+its head. An append or a drain is in place when it is the only update of the column
+in its summand, possibly under `if` (`f = f[i -> f(i) <| e]`,
+`f = if(c, f[i -> tail(f(i))], f)`, with the same `i` on both sides of `->`): it is
+applied after every right side of the summand has been evaluated (§3.8.4), it moves
+one cell, and a drain of an empty list is `Undefined`. A chain of two updates of the
+column in one summand writes whole lists, each in `O(k)`, since `f[i -> v][j -> w]`
+must give `w` at `i` when `i` and `j` are equal. Its reference is mCRL2's lists, and
+its conformance test (§3.10.1) runs seeded random sequences of appends, drains,
+heads, lengths, emptiness tests, reads and writes at several ids, evaluated by
+`lps2lts` on a one-summand process that applies them to a column, against the
+implementation.
 
 The priority queue and the ordered set are for a model that keeps such a structure
 in its own state. A model that leaves an order to the policy gets an index instead,
@@ -1105,11 +1186,15 @@ check of 2026-10-07 quoted in §3.7.4 did.
 
 The TypeScript backend's representations are its own (§3.18.2).
 
-Not implemented yet: the representations of this table other than the index. The Rust
-and Python backends represent values generically and correctly but not at the costs above. In
+Not implemented yet: the representations of this table other than the index and, in
+Rust, the per-id growing list of a `List` column. The Rust and Python backends
+represent values generically and correctly but not at the costs above. In
 Python a function-sorted parameter is a default plus a `dict` of entries, a list is
-a tuple and a finite set a `frozenset`; in Rust every integer is an `i128` and
-functions and sets are ordered maps and sets of `std::collections`. The index is
+a tuple and a finite set a `frozenset` (§3.12), so an append or a drain there copies
+the tuple; in Rust every integer is an `i128` and
+functions and sets are ordered maps and sets of `std::collections`, except a column of
+`List(I)` with `repr = "adj-append"`, which is the pool of this table (`Adj` in the
+crate's runtime, its per-id slots a `Vec` grown to the largest id written). The index is
 implemented with ordered sets and lazy deletion in Rust and with `heapq` in Python,
 with stamps for `newest` and `oldest`; `least` is a search of the set.
 
@@ -1134,7 +1219,8 @@ No implementation's iteration order reaches an action or a state. Hash maps and 
 sets are never iterated, quantifiers over per-id collections produce Booleans, and
 every selector uses an order fixed by its entry or index (§3.7.1, §3.7.6). An index
 breaks every tie by the least id, and its stamps count entries in the order the
-summands make them, which every backend follows. This is what lets the backends,
+summands make them and, within one summand, in ascending order of id (§3.8.3), which
+every backend follows. This is what lets the backends,
 with different hash functions, take the same actions.
 
 ### 3.11 The Rust backend
@@ -1299,7 +1385,21 @@ the representation (§3.10.3):
   body costs `O(k)` on another;
 - `O(k · log F)`: a walk or a per-id collection operation of cost `O(k)` that
   writes a parameter read by an index or an ordered bitset, each write then costing
-  an `O(log F)` refresh (§3.8.3).
+  an `O(log F)` refresh (§3.8.3); and the refresh, `first` and `some` of an index
+  whose key is a list (§3.7.6), whose keys are compared in `O(k)` each, `k` the
+  length of the key.
+
+A read or an update of a hash map (§3.10.3) whose key sort holds lists, such as
+`made: Key -> Nat` with `Key = struct key(knode: Nat, kvals: List(Val))` and
+`Val = struct vl(vsrc: Nat, vitem: Nat)`, is `O(k)`, `k` the number of elements in
+the key's lists, which are hashed and compared whole; it does not depend on the
+number of keys the map holds. It is allowed where the key's lists are built in
+`O(k)` from per-id collections and list arguments, as such a key usually is (from
+`kvals` read off the columns of one id). Every backend keys such a map by the whole
+value: Rust orders it by the derived order of the record (its fields in turn, lists
+lexicographically), Python hashes the tuple, TypeScript keys its `Map` by the value's
+JSON text; the encoding of the state lists the keys in the model's order in all three
+(§3.16.5).
 
 A selector costs what its operations cost: `least(W)`, `first(J)` and `some(J)` are
 `O(log F)` amortised (times the classes of `J`, a constant of the model), and a map of

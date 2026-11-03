@@ -1,0 +1,12 @@
+% observers.mcrl2 -- observers of state invariants, for verification only. Each is a
+% summand  violation -> o_<name>(...) . Core()  that leaves the state unchanged: it is
+% enabled exactly in the reachable states where the invariant fails. QUIESCENT is
+% replaced by "no output of the refined Core is enabled". The generator inserts them
+% into Core for the refined systems; they never reach the generated code.
+% @act
+act o_stuck, o_done: Task;
+% @summands
+  % a waiting task waits for something
+  + sum x: Task . (tx(x) < nt && st(x) == Waiting && missing(x) == 0) -> o_stuck(x) . Core()
+  % at the end of a step every done task has told its waiters and is dropped
+  + sum x: Task . (tx(x) < nt && QUIESCENT && st(x) == Done) -> o_done(x) . Core()

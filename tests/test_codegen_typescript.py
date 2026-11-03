@@ -1,5 +1,6 @@
 """The TypeScript backend (docs/spec.md §3.18) against mCRL2, and the three
-backends against each other (§3.16), on examples/jobqueue and examples/form.
+backends against each other (§3.16), on examples/jobqueue, examples/form and
+examples/waits.
 
 - the generated modules type-check under Deno with Svelte's rune declarations;
   the plain module imports nothing and the Svelte module only the plain one;
@@ -58,6 +59,7 @@ def _int_config(name, mcrl2_map):
 EXAMPLES = {
     "jobqueue": (_int_config("w", "I_w"), [({"w": 1}, {"Job": 2}), ({"w": 2}, {"Job": 3})], ("small", "flaky")),
     "form": (_int_config("limit", "I_limit"), [({"limit": 1}, {}), ({"limit": 3}, {})], ("small",)),
+    "waits": (_int_config("cap", "I_cap"), [({"cap": 2}, {"Task": 2}), ({"cap": 3}, {"Task": 3})], ("small",)),
 }
 
 
@@ -393,6 +395,9 @@ class StateSpace(unittest.TestCase):
     def test_form(self):
         self.assertGreater(max(self._compare("form")), 15)
 
+    def test_waits(self):
+        self.assertGreater(max(self._compare("waits")), 200)
+
 
 class Traces(unittest.TestCase):
     """§3.8.9, §3.8.10: the TypeScript acceptor accepts every entry of random paths of the model
@@ -485,6 +490,9 @@ class CrossCheck(unittest.TestCase):
 
     def test_form(self):
         self.assertGreater(self._check("form"), 400)
+
+    def test_waits(self):
+        self.assertGreater(self._check("waits"), 400)
 
 
 if __name__ == "__main__":

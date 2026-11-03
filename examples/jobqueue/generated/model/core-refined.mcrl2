@@ -49,12 +49,14 @@ eqn ix_first_retryable([]) = job(0);
     ix_first_retryable(ix_y |> ix_l) = if(true, ix_y, ix_first_retryable(ix_l));
     ix_some_retryable([]) = false;
     ix_some_retryable(ix_y |> ix_l) = true || ix_some_retryable(ix_l);
-map ix_upd_retryable: List(Job) # Job # Bool # Bool -> List(Job);
-    ix_rm_retryable: List(Job) # Job -> List(Job);
-var ix_l: List(Job); ix_y, ix_x: Job; ix_a, ix_b: Bool;
-eqn ix_upd_retryable(ix_l, ix_y, ix_a, ix_b) = if(ix_b && !ix_a, if(ix_y in ix_l, ix_l, ix_l <| ix_y), if(ix_a && !ix_b, ix_rm_retryable(ix_l, ix_y), ix_l));
-    ix_rm_retryable([], ix_y) = [];
-    ix_rm_retryable(ix_x |> ix_l, ix_y) = if(ix_x == ix_y, ix_l, ix_x |> ix_rm_retryable(ix_l, ix_y));
+map ix_out_retryable: List(Job) # FSet(Job) -> List(Job);
+    ix_ins_retryable: List(Job) # FSet(Job) # Nat -> List(Job);
+var ix_l: List(Job); ix_x: Job; ix_s: FSet(Job); ix_i: Nat;
+eqn ix_out_retryable([], ix_s) = [];
+    ix_out_retryable(ix_x |> ix_l, ix_s) = if(ix_x in ix_s, ix_out_retryable(ix_l, ix_s), ix_x |> ix_out_retryable(ix_l, ix_s));
+    ix_s == {} -> ix_ins_retryable(ix_l, ix_s, ix_i) = ix_l;
+    ix_s != {} && job(ix_i) in ix_s -> ix_ins_retryable(ix_l, ix_s, ix_i) = ix_ins_retryable(ix_l <| job(ix_i), ix_s - {job(ix_i)}, ix_i + 1);
+    ix_s != {} && !(job(ix_i) in ix_s) -> ix_ins_retryable(ix_l, ix_s, ix_i) = ix_ins_retryable(ix_l, ix_s, ix_i + 1);
 % index spent
 map ix_mem_spent: (Job -> JSt) # (Job -> Nat) # Job -> Bool;
 var ix_p_st: Job -> JSt; ix_p_tries: Job -> Nat; ix_v: Job;
@@ -109,7 +111,7 @@ sum j: Job .
          st = st[j -> QUEUED],
          Q = Q + {j},
          entered = entered[QUEUED -> entered(QUEUED) + 1],
-         ix_retryable = ix_upd_retryable(ix_retryable, (j), ix_mem_retryable(st, tries, (j)), ix_mem_retryable((st[j -> QUEUED]), tries, (j))))
+         ix_retryable = ix_ins_retryable(ix_out_retryable(ix_retryable, if(ix_a1 && !ix_b1, {j}, {})), if(ix_b1 && !ix_a1, {j}, {}), 0) whr ix_a1 = ix_mem_retryable(st, tries, (j)), ix_b1 = ix_mem_retryable((st[j -> QUEUED]), tries, (j)) end)
 
  + % c_finished input
 sum j: Job .
@@ -118,7 +120,7 @@ sum j: Job .
     Core(st = st[j -> DONE],
          slots = slots + 1,
          entered = entered[DONE -> entered(DONE) + 1],
-         ix_retryable = ix_upd_retryable(ix_retryable, (j), ix_mem_retryable(st, tries, (j)), ix_mem_retryable((st[j -> DONE]), tries, (j))))
+         ix_retryable = ix_ins_retryable(ix_out_retryable(ix_retryable, if(ix_a1 && !ix_b1, {j}, {})), if(ix_b1 && !ix_a1, {j}, {}), 0) whr ix_a1 = ix_mem_retryable(st, tries, (j)), ix_b1 = ix_mem_retryable((st[j -> DONE]), tries, (j)) end)
 
  + % c_crashed input
 sum j: Job .
@@ -127,14 +129,14 @@ sum j: Job .
     Core(st = st[j -> FAILED],
          slots = slots + 1,
          entered = entered[FAILED -> entered(FAILED) + 1],
-         ix_retryable = ix_upd_retryable(ix_retryable, (j), ix_mem_retryable(st, tries, (j)), ix_mem_retryable((st[j -> FAILED]), tries, (j))))
+         ix_retryable = ix_ins_retryable(ix_out_retryable(ix_retryable, if(ix_a1 && !ix_b1, {j}, {})), if(ix_b1 && !ix_a1, {j}, {}), 0) whr ix_a1 = ix_mem_retryable(st, tries, (j)), ix_b1 = ix_mem_retryable((st[j -> FAILED]), tries, (j)) end)
 
  + % c_give_up output c_give_up
 (ix_en_0(nj, st, tries)) ->
     c_give_up((ix_first_spent(st, tries, nj, 0))) .
     Core(st = st[(ix_first_spent(st, tries, nj, 0)) -> GAVEUP],
          entered = entered[GAVEUP -> entered(GAVEUP) + 1],
-         ix_retryable = ix_upd_retryable(ix_retryable, ((ix_first_spent(st, tries, nj, 0))), ix_mem_retryable(st, tries, ((ix_first_spent(st, tries, nj, 0)))), ix_mem_retryable((st[(ix_first_spent(st, tries, nj, 0)) -> GAVEUP]), tries, ((ix_first_spent(st, tries, nj, 0))))))
+         ix_retryable = ix_ins_retryable(ix_out_retryable(ix_retryable, if(ix_a1 && !ix_b1, {(ix_first_spent(st, tries, nj, 0))}, {})), if(ix_b1 && !ix_a1, {(ix_first_spent(st, tries, nj, 0))}, {}), 0) whr ix_a1 = ix_mem_retryable(st, tries, ((ix_first_spent(st, tries, nj, 0)))), ix_b1 = ix_mem_retryable((st[(ix_first_spent(st, tries, nj, 0)) -> GAVEUP]), tries, ((ix_first_spent(st, tries, nj, 0)))) end)
 
  + % c_retry output c_retry
 (ix_en_1(st, tries, ix_retryable) && !ix_en_0(nj, st, tries)) ->
@@ -142,7 +144,7 @@ sum j: Job .
     Core(st = st[(ix_first_retryable(ix_retryable)) -> QUEUED],
          Q = Q + {(ix_first_retryable(ix_retryable))},
          entered = entered[QUEUED -> entered(QUEUED) + 1],
-         ix_retryable = ix_upd_retryable(ix_retryable, ((ix_first_retryable(ix_retryable))), ix_mem_retryable(st, tries, ((ix_first_retryable(ix_retryable)))), ix_mem_retryable((st[(ix_first_retryable(ix_retryable)) -> QUEUED]), tries, ((ix_first_retryable(ix_retryable))))))
+         ix_retryable = ix_ins_retryable(ix_out_retryable(ix_retryable, if(ix_a1 && !ix_b1, {(ix_first_retryable(ix_retryable))}, {})), if(ix_b1 && !ix_a1, {(ix_first_retryable(ix_retryable))}, {}), 0) whr ix_a1 = ix_mem_retryable(st, tries, ((ix_first_retryable(ix_retryable)))), ix_b1 = ix_mem_retryable((st[(ix_first_retryable(ix_retryable)) -> QUEUED]), tries, ((ix_first_retryable(ix_retryable)))) end)
 
  + % c_start output c_start
 (ix_en_2(Q, slots) && !ix_en_0(nj, st, tries) && !ix_en_1(st, tries, ix_retryable)) ->
@@ -153,7 +155,7 @@ sum j: Job .
          tries = tries[(ix_least_Job(Q, 0)) -> tries((ix_least_Job(Q, 0))) + 1],
          entered = entered[RUNNING -> entered(RUNNING) + 1],
          byTries = byTries[tries((ix_least_Job(Q, 0))) + 1 -> byTries(tries((ix_least_Job(Q, 0))) + 1) + 1],
-         ix_retryable = ix_upd_retryable(ix_retryable, ((ix_least_Job(Q, 0))), ix_mem_retryable(st, tries, ((ix_least_Job(Q, 0)))), ix_mem_retryable((st[(ix_least_Job(Q, 0)) -> RUNNING]), (tries[(ix_least_Job(Q, 0)) -> tries((ix_least_Job(Q, 0))) + 1]), ((ix_least_Job(Q, 0))))))
+         ix_retryable = ix_ins_retryable(ix_out_retryable(ix_retryable, if(ix_a1 && !ix_b1, {(ix_least_Job(Q, 0))}, {})), if(ix_b1 && !ix_a1, {(ix_least_Job(Q, 0))}, {}), 0) whr ix_a1 = ix_mem_retryable(st, tries, ((ix_least_Job(Q, 0)))), ix_b1 = ix_mem_retryable((st[(ix_least_Job(Q, 0)) -> RUNNING]), (tries[(ix_least_Job(Q, 0)) -> tries((ix_least_Job(Q, 0))) + 1]), ((ix_least_Job(Q, 0)))) end)
 
 %@observers
   + delta;

@@ -566,10 +566,21 @@ class Emitter:
             return "(%s // %s)" % (a[0], a[1])
         if hn in ("min", "max"):
             return "%s(%s, %s)" % (hn, a[0], a[1])
-        if hn == "succ":
+        if hn in ("succ", "@succ_nat", "@succ_pos"):
             return "(%s + 1)" % a[0]
         if hn == "pred":
             return "(%s - 1)" % a[0]
+        # the rewriter's normal forms (§3.2.6)
+        if hn == "@natpred":
+            return "max(0, %s - 1)" % a[0]
+        if hn == "@pospred":
+            return "max(1, %s - 1)" % a[0]
+        if hn == "@monus":
+            return "max(0, %s - %s)" % (a[0], a[1])
+        if hn == "@equals_zero":
+            return "(%s == 0)" % a[0]
+        if hn == "@equals_one":
+            return "(%s == 1)" % a[0]
         if hn == "abs":
             return "abs(%s)" % a[0]
         if hn in ("Pos2Nat", "Nat2Int", "Pos2Int", "@cNat", "@cInt"):
@@ -1065,7 +1076,7 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     # The refresh after every summand (§3.8.3) and the audit (§3.9.9).
     lines += ["", "", "def _refresh(s):"]
     for srt in sorts:
-        lines += ["    d = s._d_%s" % srt, "    if d:", "        ids = list(dict.fromkeys(d))", "        d.clear()",
+        lines += ["    d = s._d_%s" % srt, "    if d:", "        ids = sorted(set(d))", "        d.clear()",
                   "        for v in ids:"]
         mine = [ix for ix in st.indexes if ix.sort == srt]
         lines += ["            _ixrefresh_%s(s, v)" % ix.name for ix in mine] or ["            pass"]
@@ -1085,12 +1096,11 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
             lines += ["    for v in ref:", "        if ent[v][1] != _ixkey_%s(s, v):" % n,
                       "            raise AuditFailed('index %s: key of %%d' %% v)" % n]
         if ix.order in ("newest", "oldest"):
+            # the ids that entered in the summand, in ascending order (§3.7.4 item 3)
             lines += ["    prev = s._aud_%s" % n, "    now = set(ref)",
                       "    entered = sorted(now - set(prev))",
-                      "    if len(entered) > 1:",
-                      "        raise AuditFailed('index %s: %%d ids entered in one summand' %% len(entered))" % n,
                       "    keep = [v for v in prev if v in now]",
-                      "    s._aud_%s = %s" % (n, "entered + keep" if ix.order == "newest" else "keep + entered"),
+                      "    s._aud_%s = %s" % (n, "entered[::-1] + keep" if ix.order == "newest" else "keep + entered"),
                       "    if s._ix_%s.ordered() != s._aud_%s:" % (n, n),
                       "        raise AuditFailed('index %s: order %%r, by definition %%r' %% (s._ix_%s.ordered(), s._aud_%s))" % (n, n, n)]
         else:

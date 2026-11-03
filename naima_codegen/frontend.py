@@ -42,6 +42,10 @@ BUILTINS = {
     "{}", "@fset_empty", "@fset_cons", "@fset_insert", "@fset_union", "@fset_diff", "@fset_inter",
     "count", "@fbag_empty", "@fbag_cons", "@fbag_insert", "@func_update",
 }
+# The toolset's internal operators of numbers that the rewriter leaves in normal forms of
+# the operators above (§3.2.6): constructors, and the operators its audit found.
+NORMAL_FORMS = {"@cNat", "@cInt", "@cNeg", "@succ_nat", "@succ_pos", "@natpred", "@pospred", "@monus",
+                "@equals_zero", "@equals_one"}
 
 
 @dataclass
@@ -452,7 +456,7 @@ def _check_expressions(lps: Lps, cfg: Config, struct_names: set, user: set, cat:
     """§3.4.1, §3.4.4, §3.4.5 (G3): operators, lambdas and quantifiers in Core;
     §3.4.8: function-sorted values in Core (G3) and in-place updates (G8).
     Returns the in-place updates per summand."""
-    allowed = BUILTINS | struct_names | user | cat
+    allowed = BUILTINS | NORMAL_FORMS | struct_names | user | cat
     columns = {n for n, s in lps.params if _is_column(lps, cfg, s)}
     fun_params = {n for n, s in lps.params if is_fun(lps, s)}
     psort = dict(lps.params)

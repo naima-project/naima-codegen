@@ -5,9 +5,9 @@ It emits what the Python backend does: the types of the model's sorts, the
 configuration, the initial state (§3.8.1, `init` included), every user map with
 the walks compiled into loops (§3.4.8), the acceptor of the unrefined Core
 (§3.8.9), `encode`/`decode` (§3.8.10) and, with a policy, the stepper (§3.8).
-Not implemented yet: the catalogue's representations and widths (§3.10;
-numbers are `i128` here, checked, §3.12.4), observables, the Python binding
-(§3.11.4).
+Not implemented yet: the catalogue's representations other than the per-id
+growing list (`Adj`, §3.10.3) and widths (§3.10; numbers are `i128` here,
+checked, §3.12.4), observables, the Python binding (§3.11.4).
 
 A summand's right sides are evaluated before anything is written (§3.8.4): a
 function-sorted parameter's new value is built as an overlay over the old one
@@ -25,7 +25,7 @@ import re
 from .expr import App, Bind, Num, Op, Var, Whr, show, walk
 from .frontend import INIT_PREFIX
 from .functions import is_fun, mentions
-from .lower import Types, g10, plan_summand, width_range
+from .lower import Types, g8, g10, plan_summand, width_range
 
 from .header import block as _header_block
 HEADER = _header_block("//")
@@ -65,63 +65,68 @@ pub enum StepError {
 
 /// An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class an
 /// ordered set of (order key, id); the order key is the id (least), the key's
-/// value (key), minus the entry stamp (newest) or the stamp (oldest).
+/// value (key, of the key's sort), minus the entry stamp (newest) or the stamp
+/// (oldest).
 #[derive(Debug, Clone, Default)]
-pub struct Ix {
+pub struct Ix<K> {
     order: u8,
-    ent: BTreeMap<u32, (usize, i128)>,
-    sets: Vec<BTreeSet<(i128, u32)>>,
+    ent: BTreeMap<u32, (usize, K)>,
+    sets: Vec<BTreeSet<(K, u32)>>,
     stamp: i128,
 }
 
-impl Ix {
-    pub fn new(order: u8, ncls: usize) -> Ix {
+impl<K: Ord + Clone> Ix<K> {
+    pub fn new(order: u8, ncls: usize) -> Ix<K> {
         Ix { order, ent: BTreeMap::new(), sets: vec![BTreeSet::new(); ncls], stamp: 0 }
     }
 
-    /// The index at one id after a write: member or not, its class and key (§3.8.3).
-    pub fn refresh(&mut self, v: u32, m: bool, c: usize, k: i128) -> Result<(), StepError> {
-        let old = self.ent.get(&v).copied();
-        if !m {
-            if let Some((oc, ok)) = old {
-                self.ent.remove(&v);
-                if let Some(set) = self.sets.get_mut(oc) {
-                    set.remove(&(ok, v));
-                }
-            }
-            return Ok(());
-        }
-        let ok = match (self.order, old) {
-            (0, _) => i128::from(v),
-            (1, _) => k,
-            (_, Some((_, o))) => o,
-            (o, None) => {
-                self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
-                if o == 2 { self.stamp.checked_neg().ok_or(StepError::Overflow("stamp"))? } else { self.stamp }
-            }
-        };
-        if old != Some((c, ok)) {
+    /// The index at one id after a write that leaves it a member, of class c
+    /// with order key ok (§3.8.3).
+    pub fn refresh(&mut self, v: u32, c: usize, ok: K) -> Result<(), StepError> {
+        let old = self.ent.get(&v).cloned();
+        if old.as_ref() != Some(&(c, ok.clone())) {
             if let Some((oc, o)) = old {
                 if let Some(set) = self.sets.get_mut(oc) {
                     set.remove(&(o, v));
                 }
             }
-            self.ent.insert(v, (c, ok));
+            self.ent.insert(v, (c, ok.clone()));
             self.sets.get_mut(c).ok_or(StepError::Undefined("index class"))?.insert((ok, v));
         }
         Ok(())
     }
 
+    /// The index at one id after a write that leaves it no member.
+    pub fn remove(&mut self, v: u32) {
+        if let Some((oc, ok)) = self.ent.remove(&v) {
+            if let Some(set) = self.sets.get_mut(oc) {
+                set.remove(&(ok, v));
+            }
+        }
+    }
+
     /// The first (order key, id) of one class.
-    pub fn front(&self, c: usize) -> Option<(i128, u32)> {
-        self.sets.get(c).and_then(|set| set.first().copied())
+    pub fn front(&self, c: usize) -> Option<(K, u32)> {
+        self.sets.get(c).and_then(|set| set.first().cloned())
     }
 
     /// The members in index order (for tests).
     pub fn ordered(&self) -> Vec<u32> {
-        let mut all: Vec<(i128, u32)> = self.ent.iter().map(|(v, (_, o))| (*o, *v)).collect();
+        let mut all: Vec<(K, u32)> = self.ent.iter().map(|(v, (_, o))| (o.clone(), *v)).collect();
         all.sort();
         all.into_iter().map(|(_, v)| v).collect()
+    }
+}
+
+impl Ix<i128> {
+    /// The order key of a member v of an index of order newest or oldest: the stamp
+    /// it entered with, or a new one if it enters now (§3.8.3).
+    pub fn stamp(&mut self, v: u32) -> Result<i128, StepError> {
+        if let Some((_, o)) = self.ent.get(&v) {
+            return Ok(*o);
+        }
+        self.stamp = self.stamp.checked_add(1).ok_or(StepError::Overflow("stamp"))?;
+        if self.order == 2 { self.stamp.checked_neg().ok_or(StepError::Overflow("stamp")) } else { Ok(self.stamp) }
     }
 }
 
@@ -230,6 +235,193 @@ impl<K: Ord, V: Clone> GetSet<K, V> for Ov<'_, K, V> {
     }
 }
 
+/// A per-id growing list (docs/spec.md §3.10.3, repr adj-append): one pool of
+/// (value, next) cells shared by the ids, a free list of the cells released, and
+/// per id its first cell, last cell and length. An append, a drain (tail), head,
+/// `== []` and `#` cost O(1); a copy or a write of a whole list O(k).
+#[derive(Debug, Clone)]
+pub struct Adj<X> {
+    /// The list of an id never written.
+    d: Vec<X>,
+    val: Vec<X>,
+    next: Vec<u32>,
+    free: u32,
+    /// Per id (first cell, last cell, length), grown to the largest id written.
+    ids: Vec<Option<(u32, u32, u32)>>,
+}
+
+/// A write of a per-id growing list, applied after the summand's reads (§3.8.4).
+pub enum AdjOp<X> {
+    Set(u32, Vec<X>),
+    Push(u32, X),
+    Pop(u32),
+}
+
+impl<X> AdjOp<X> {
+    /// The id it writes.
+    pub fn id(&self) -> u32 {
+        match self {
+            AdjOp::Set(i, _) | AdjOp::Push(i, _) | AdjOp::Pop(i) => *i,
+        }
+    }
+}
+
+const ADJ_NIL: u32 = u32::MAX;
+
+/// A cell or id as an index; u32 always fits a usize where the crate builds.
+fn adj_at(c: u32) -> usize {
+    usize::try_from(c).unwrap_or(usize::MAX)
+}
+
+impl<X: Clone + PartialEq> Adj<X> {
+    pub fn new(d: Vec<X>) -> Adj<X> {
+        Adj { d, val: Vec::new(), next: Vec::new(), free: ADJ_NIL, ids: Vec::new() }
+    }
+
+    fn slot(&self, i: u32) -> Option<(u32, u32, u32)> {
+        self.ids.get(adj_at(i)).copied().flatten()
+    }
+
+    fn link(&self, c: u32) -> u32 {
+        self.next.get(adj_at(c)).copied().unwrap_or(ADJ_NIL)
+    }
+
+    fn set_link(&mut self, c: u32, n: u32) {
+        if let Some(l) = self.next.get_mut(adj_at(c)) {
+            *l = n;
+        }
+    }
+
+    /// A cell holding x, from the free list or new.
+    fn alloc(&mut self, x: X) -> Result<u32, StepError> {
+        let c = self.free;
+        if let Some(v) = self.val.get_mut(adj_at(c)) {
+            *v = x;
+            self.free = self.link(c);
+            self.set_link(c, ADJ_NIL);
+            return Ok(c);
+        }
+        let c = u32::try_from(self.val.len()).ok().filter(|c| *c != ADJ_NIL).ok_or(StepError::Overflow("pool"))?;
+        self.val.push(x);
+        self.next.push(ADJ_NIL);
+        Ok(c)
+    }
+
+    /// The cells from c on go to the free list.
+    fn release(&mut self, mut c: u32) {
+        while c != ADJ_NIL {
+            let n = self.link(c);
+            self.set_link(c, self.free);
+            self.free = c;
+            c = n;
+        }
+    }
+
+    fn put(&mut self, i: u32, s: (u32, u32, u32)) {
+        let k = adj_at(i);
+        if self.ids.len() <= k {
+            self.ids.resize(k.saturating_add(1), None);
+        }
+        if let Some(x) = self.ids.get_mut(k) {
+            *x = Some(s);
+        }
+    }
+
+    /// The slot of id i, with the default list put into the pool if i was never written.
+    fn own(&mut self, i: u32) -> Result<(u32, u32, u32), StepError> {
+        if let Some(s) = self.slot(i) {
+            return Ok(s);
+        }
+        self.put(i, (ADJ_NIL, ADJ_NIL, 0));
+        for x in self.d.clone() {
+            self.push(i, x)?;
+        }
+        Ok(self.slot(i).unwrap_or((ADJ_NIL, ADJ_NIL, 0)))
+    }
+
+    pub fn to_vec(&self, i: u32) -> Vec<X> {
+        let Some((mut c, _, _)) = self.slot(i) else { return self.d.clone() };
+        let mut out = Vec::new();
+        while let Some(x) = self.val.get(adj_at(c)) {
+            out.push(x.clone());
+            c = self.link(c);
+        }
+        out
+    }
+
+    pub fn head(&self, i: u32) -> Result<X, StepError> {
+        match self.slot(i) {
+            None => self.d.first().cloned(),
+            Some((c, _, _)) => self.val.get(adj_at(c)).cloned(),
+        }
+        .ok_or(StepError::Undefined("head"))
+    }
+
+    pub fn len(&self, i: u32) -> usize {
+        self.slot(i).map_or(self.d.len(), |(_, _, n)| adj_at(n))
+    }
+
+    pub fn is_empty(&self, i: u32) -> bool {
+        self.len(i) == 0
+    }
+
+    /// f[i -> f(i) <| x].
+    pub fn push(&mut self, i: u32, x: X) -> Result<(), StepError> {
+        let (first, last, n) = self.own(i)?;
+        let c = self.alloc(x)?;
+        let n = n.checked_add(1).ok_or(StepError::Overflow("pool"))?;
+        if last == ADJ_NIL {
+            self.put(i, (c, c, n));
+        } else {
+            self.set_link(last, c);
+            self.put(i, (first, c, n));
+        }
+        Ok(())
+    }
+
+    /// f[i -> tail(f(i))].
+    pub fn pop(&mut self, i: u32) -> Result<(), StepError> {
+        let (first, last, n) = self.own(i)?;
+        if n == 0 {
+            return Err(StepError::Undefined("tail"));
+        }
+        let next = self.link(first);
+        self.set_link(first, self.free);
+        self.free = first;
+        self.put(i, if next == ADJ_NIL { (ADJ_NIL, ADJ_NIL, 0) } else { (next, last, n.saturating_sub(1)) });
+        Ok(())
+    }
+
+    /// f[i -> l].
+    pub fn set(&mut self, i: u32, l: Vec<X>) -> Result<(), StepError> {
+        if let Some((first, _, _)) = self.slot(i) {
+            self.release(first);
+        }
+        self.put(i, (ADJ_NIL, ADJ_NIL, 0));
+        for x in l {
+            self.push(i, x)?;
+        }
+        Ok(())
+    }
+
+    pub fn apply(&mut self, op: AdjOp<X>) -> Result<(), StepError> {
+        match op {
+            AdjOp::Set(i, l) => self.set(i, l),
+            AdjOp::Push(i, x) => self.push(i, x),
+            AdjOp::Pop(i) => self.pop(i),
+        }
+    }
+
+    /// The ids whose list differs from the default, ascending, with their lists.
+    pub fn entries(&self) -> Vec<(u32, Vec<X>)> {
+        (0..self.ids.len())
+            .filter_map(|k| u32::try_from(k).ok())
+            .map(|i| (i, self.to_vec(i)))
+            .filter(|(i, l)| self.slot(*i).is_some() && *l != self.d)
+            .collect()
+    }
+}
+
 mod rt {
     use super::StepError;
     use std::collections::BTreeSet;
@@ -251,6 +443,10 @@ mod rt {
     }
     pub fn neg(a: i128) -> Result<i128, StepError> {
         a.checked_neg().ok_or(StepError::Overflow("-"))
+    }
+    /// a ∸ b: max(0, a - b) (docs/spec.md §3.2.6).
+    pub fn monus(a: i128, b: i128) -> Result<i128, StepError> {
+        Ok(sub(a, b)?.max(0))
     }
     /// A value written to a parameter fits its width (docs/spec.md §3.12.4).
     pub fn fit(v: i128, lo: i128, hi: i128, name: &'static str) -> Result<i128, StepError> {
@@ -554,6 +750,9 @@ class Emitter:
         self.walks = model.walks
         # queue parameters (repr deque): a VecDeque in S, read at its head, tailed and appended in place
         self.deques = {p.name for p in model.params if p.repr == "deque"}
+        # per-id growing lists (repr adj-append on a column of lists): an Adj in S (§3.10.3)
+        self.adjs = {p.name for p in model.params if p.repr == "adj-append" and self.types.resolve(p.sort)[0] == "->"
+                     and self.types.resolve(self.types.resolve(p.sort)[2])[0] == "List"}
         self.n = 0
         # occurrences of a variable whose value is moved, not cloned: {id(Var): code} (see takes)
         self.moves = {}
@@ -600,6 +799,20 @@ class Emitter:
                 continue
             raise g10("sort %s" % str(x), "no Rust type")
         return out[0]
+
+    def param_scope(self, n: str, fps: set):
+        """The scope entry of parameter n (see expr)."""
+        if n in self.adjs:
+            return "s.%s" % ident(n), "adj"
+        return ("(&s.%s)" % ident(n), "ref") if n in fps else ("s.%s" % ident(n), "val")
+
+    def param_rtype(self, n: str, s) -> str:
+        """The type of parameter n in S: its sort's, or its representation's (§3.10.3)."""
+        if n in self.deques:
+            return "VecDeque<%s>" % self.rtype(s)[len("Vec<"):-1]
+        if n in self.adjs:
+            return "Adj<%s>" % self.rtype(self.types.resolve(self.types.resolve(s)[2])[1])
+        return self.rtype(s)
 
     def kv(self, s):
         s = self.types.resolve(s)
@@ -792,6 +1005,10 @@ class Emitter:
                 continue
             h = x.head
             hn = h.name if isinstance(h, Op) else None
+            adj = self.adj_read(x, scope)
+            if adj is not None:
+                out.append(adj)
+                continue
             if is_fun(self.lps, self._sort_of(x)):
                 raise g10("expression %s" % show(x)[:80], "a function where a value is expected")
             if hn == "head" and len(x.args) == 1 and not isinstance(x.args[0], Var) \
@@ -840,6 +1057,79 @@ class Emitter:
                 continue
             out.append(self._app(x, hn, args))
         return out[-1]
+
+    def adj_list(self, x, scope: dict):
+        """(column, id code) when x reads a per-id growing list, f(i) (§3.10.3)."""
+        if isinstance(x, App) and isinstance(x.head, Var) and len(x.args) == 1:
+            code, kind = scope.get(x.head.name, (None, None))
+            if kind == "adj":
+                return code, "(%s).0" % self.expr(x.args[0], scope)
+        return None
+
+    def adj_read(self, x, scope: dict):
+        """A read of a per-id growing list: head, `#`, `== []` in place, any other read a copy."""
+        hn = x.head.name if isinstance(x.head, Op) else None
+        if hn in ("head", "#") and len(x.args) == 1:
+            r = self.adj_list(x.args[0], scope)
+            if r is not None:
+                return "%s.head(%s)?" % r if hn == "head" else "rt::count(%s.len(%s))?" % r
+        if hn in ("==", "!=") and len(x.args) == 2:
+            for a, b in ((x.args[0], x.args[1]), (x.args[1], x.args[0])):
+                r = self.adj_list(a, scope)
+                if r is not None and isinstance(b, Op) and b.name == "[]":
+                    return "%s%s.is_empty(%s)" % ("" if hn == "==" else "!", r[0], r[1])
+        r = self.adj_list(x, scope)
+        return "%s.to_vec(%s)" % r if r is not None else None
+
+    def adj_plan(self, fe, root: str, scope: dict, lines: list, ind: str, ops: str):
+        """Statements that push onto `ops` the writes of a function expression built from
+        the per-id growing list `root`, every index, value and condition evaluated now
+        (§3.8.4). An append or a drain at the id it reads is in place when no path writes
+        the column twice; otherwise every write is of a whole list, in order (§3.10.3)."""
+        most, stack = 0, [(fe, 0)]
+        while stack:
+            x, n = stack.pop()
+            h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
+            if h == "@func_update":
+                stack.append((x.args[0], n + 1))
+            elif h == "if":
+                stack += [(x.args[1], n), (x.args[2], n)]
+            else:
+                most = max(most, n)
+
+        def at(v, idx):
+            return (isinstance(v, App) and isinstance(v.head, Var) and v.head.name == root and len(v.args) == 1
+                    and show(v.args[0]) == show(idx))
+
+        stack = [("fe", fe, ind)]
+        while stack:
+            kind, x, i = stack.pop()
+            if kind == "line":
+                lines.append(i + x)
+                continue
+            if isinstance(x, Var) and x.name == root:
+                continue
+            h = x.head.name if isinstance(x, App) and isinstance(x.head, Op) else None
+            if h == "@func_update":
+                idx, v = x.args[1], x.args[2]
+                k = "(%s).0" % self.expr(idx, scope)
+                vh = v.head.name if isinstance(v, App) and isinstance(v.head, Op) else None
+                if most <= 1 and vh == "<|" and at(v.args[0], idx):
+                    op = "AdjOp::Push(%s, %s)" % (k, self.expr(v.args[1], scope))
+                elif most <= 1 and vh == "tail" and at(v.args[0], idx):
+                    op = "AdjOp::Pop(%s)" % k
+                else:
+                    op = "AdjOp::Set(%s, %s)" % (k, self.expr(v, scope))
+                stack.append(("line", "%s.push(%s);" % (ops, op), i))
+                stack.append(("fe", x.args[0], i))
+            elif h == "if":
+                stack.append(("line", "}", i))
+                stack.append(("fe", x.args[2], i + "    "))
+                stack.append(("line", "} else {", i))
+                stack.append(("fe", x.args[1], i + "    "))
+                stack.append(("line", "if %s {" % self.expr(x.args[0], scope), i))
+            else:
+                raise g8("function expression %s" % show(x)[:80], "the per-id list %s written other than by updates" % root)
 
     def ix_app(self, x, hn: str, scope: dict) -> str:
         """A selection operation of the refined Core (docs/spec.md §3.7.5)."""
@@ -957,10 +1247,21 @@ class Emitter:
             return "(%s).min(%s)" % (a[0], a[1])
         if hn == "max":
             return "(%s).max(%s)" % (a[0], a[1])
-        if hn == "succ":
+        if hn in ("succ", "@succ_nat", "@succ_pos"):
             return "rt::add(%s, 1)?" % a[0]
         if hn == "pred":
             return "rt::sub(%s, 1)?" % a[0]
+        # the rewriter's normal forms (§3.2.6)
+        if hn == "@natpred":
+            return "rt::monus(%s, 1)?" % a[0]
+        if hn == "@pospred":
+            return "rt::sub(%s, 1)?.max(1)" % a[0]
+        if hn == "@monus":
+            return "rt::monus(%s, %s)?" % (a[0], a[1])
+        if hn == "@equals_zero":
+            return "(%s == 0)" % a[0]
+        if hn == "@equals_one":
+            return "(%s == 1)" % a[0]
         if hn == "abs":
             return "(%s).checked_abs().ok_or(StepError::Overflow(\"abs\"))?" % a[0]
         if hn in ("Pos2Nat", "Nat2Int", "Pos2Int", "@cNat", "@cInt"):
@@ -1057,6 +1358,8 @@ class Emitter:
                 return code, "ref"
             if kind == "mut":
                 return "%s.as_get()" % code, "ref"
+            if kind == "adj":
+                raise g8("expression %s" % show(e)[:80], "the per-id list %s used whole" % e.name)
             raise g10("expression %s" % show(e)[:80], "%s is not a function" % e.name)
         h = e.head.name if isinstance(e, App) and isinstance(e.head, Op) else None
         if h == "@func_update":
@@ -1421,8 +1724,7 @@ def emit(model, st=None, package: str = "generated", workspace: bool = False) ->
     out += ["/// The configuration parameters of Core (§3.6.2).", "#[derive(Debug, Clone)]", "pub struct Config {"]
     out += ["    pub %s: %s," % (ident(n), em.rtype(sorts[n])) for n in config]
     out += ["}", "", "/// A state of Core: one field per parameter.", "#[derive(Debug, Clone)]", "pub struct S {"]
-    out += ["    pub %s: %s," % (ident(n), em.rtype(sorts[n]) if n not in em.deques else
-                                 "VecDeque<%s>" % em.rtype(sorts[n])[len("Vec<"):-1]) for n in names]
+    out += ["    pub %s: %s," % (ident(n), em.param_rtype(n, sorts[n])) for n in names]
     xfields = _stepper_fields(st) if st is not None else []
     out += ["    pub %s: %s," % f for f in xfields]
     fps0 = {n for n, s in lps.params if is_fun(lps, s)}
@@ -1432,6 +1734,8 @@ def emit(model, st=None, package: str = "generated", workspace: bool = False) ->
             val = "config.%s.clone()" % ident(n)
         elif n in model.inits:
             val = "m_gen_init_%s(%s)?" % (ident(n), ", ".join("config.%s.clone()" % ident(c) for c in config))
+        elif n in em.adjs:
+            val = "Adj::new(%s)" % em.expr(v.body, {})
         else:
             val = em.expr(v, {})
         r = width_range(model, n)
@@ -1520,7 +1824,7 @@ def _emit_summand(em: Emitter, model, s, k, fps: set, watched: dict | None = Non
     sorts = dict(lps.params)
     pscope = {}
     for n, srt in lps.params:
-        pscope[n] = ("(&s.%s)" % ident(n), "ref") if n in fps else ("s.%s" % ident(n), "val")
+        pscope[n] = em.param_scope(n, fps)
     args = "".join(", a%d: &%s" % (j, em.rtype(t)) for j, t in enumerate(s.sorts))
     svt = [em.rtype(t) for _, t in s.sumvars]
     env_t = "(%s)" % "".join("%s, " % t for t in svt)
@@ -1570,9 +1874,14 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
     """The next state: overlays and new values first, then the writes (§3.8.4); a
     write to what an index reads dirties its id (docs/spec.md §3.8.3)."""
     lines = []
-    commits, writes, deferred = [], [], []
+    commits, writes, deferred, adjs = [], [], [], []
     for n, e in s.assigns:
-        if n in fps:
+        if n in em.adjs:
+            ov = "a_" + ident(n)
+            lines.append("    let mut %s: Vec<AdjOp<%s>> = Vec::new();" % (ov, em.param_rtype(n, dict(model.lps.params)[n])[len("Adj<"):-1]))
+            em.adj_plan(e, n, scope, lines, "    ", ov)
+            adjs.append(n)
+        elif n in fps:
             o = "o_" + ident(n)
             lines.append("    let mut %s = Ov::over(&s.%s);" % (o, ident(n)))
             em.apply_fe(e, o, scope, lines, "    ")
@@ -1618,6 +1927,11 @@ def _fire_body(em: Emitter, model, s, scope: dict, fps: set, watched: dict | Non
         em.moves = {} if k is None else em.takes(e, n, "std::mem::take(&mut s.%s)" % ident(n))
         lines.append("    let n_%s = %s;" % (ident(n), em.expr(e, scope)))
         em.moves, em.hoists = {}, set()
+    for n in adjs:
+        lines.append("    for op in a_%s {" % ident(n))
+        if watched and n in watched:
+            lines.append("        s.dirty_%s.push(op.id());" % watched[n])
+        lines += ["        s.%s.apply(op)?;" % ident(n), "    }"]
     for n in commits:
         r = width_range(model, n)
         v = "v" if r is None else 'rt::fit(v, %d, %d, "%s")?' % (r[0], r[1], n)
@@ -1716,7 +2030,13 @@ _ORDERS = {"least": 0, "key": 1, "newest": 2, "oldest": 3}
 
 def _stepper_fields(st) -> list:
     sorts = sorted({ix.sort for ix in st.indexes} | set(st.watched.values()))
-    return [("dirty_%s" % x, "Vec<u32>") for x in sorts] + [("ix_%s" % ix.name, "Ix") for ix in st.indexes]
+    return [("dirty_%s" % x, "Vec<u32>") for x in sorts] + [("ix_%s" % ix.name, "Ix<%s>" % _ix_key_type(st, ix))
+                                                             for ix in st.indexes]
+
+
+def _ix_key_type(st, ix) -> str:
+    """The Rust type of an index's order keys: the key's (§3.7.6), or i128."""
+    return Emitter(st.model).rtype(ix.key_sort) if ix.key_sort is not None else "i128"
 
 
 def _ix_fn(em: Emitter, ix, part: str, arg: str | None, argty: str | None, res: str, mut: bool = False) -> list:
@@ -1726,7 +2046,7 @@ def _ix_fn(em: Emitter, ix, part: str, arg: str | None, argty: str | None, res: 
     for a in args:
         if a.startswith("ix_p_"):
             p = a[len("ix_p_"):]
-            scope[a] = ("(&s.%s)" % ident(p), "ref") if p in fps else ("s.%s" % ident(p), "val")
+            scope[a] = em.param_scope(p, fps)
         else:
             scope[a] = (arg, "val")
     sig = "s: &S" + (", %s: %s" % (arg, argty) if arg else "")
@@ -1750,18 +2070,19 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
             out += ["fn ixclsno_%s(k: &%s) -> usize {" % (ix.name, ct), "    match k {"]
             out += ["        %s::%s => %d," % (ct, ident(c), j) for j, c in enumerate(ix.classes)]
             out += ["    }", "}", ""]
+        kt = _ix_key_type(st, ix)
         if "key" in ix.eqs:
-            out += _ix_fn(em, ix, "key", "v", it, "i128")
+            out += _ix_fn(em, ix, "key", "v", it, kt)
         out += _ix_fn(em, ix, "bound", None, None, "i128")
         if "cls" in ix.eqs:
             ct = type_name(ix.cls_sort)
             classes = ", ".join("%s::%s" % (ct, ident(c)) for c in ix.classes)
             out += ["fn ixfirst_%s(s: &S) -> Result<%s, StepError> {" % (ix.name, it),
-                    "    let mut best: Option<(i128, u32)> = None;",
+                    "    let mut best: Option<(%s, u32)> = None;" % kt,
                     "    for (c, k) in [%s].into_iter().enumerate() {" % classes,
                     "        if !ixadm_%s(s, k)? {" % ix.name, "            continue;", "        }",
                     "        if let Some(f) = s.ix_%s.front(c) {" % ix.name,
-                    "            if best.is_none_or(|b| f < b) {", "                best = Some(f);", "            }", "        }",
+                    "            if best.as_ref().is_none_or(|b| f < *b) {", "                best = Some(f);", "            }", "        }",
                     "    }",
                     '    best.map(|(_, v)| %s(v)).ok_or(StepError::Undefined("first(%s)"))' % (it, ix.name), "}", "",
                     "fn ixsome_%s(s: &S) -> Result<bool, StepError> {" % ix.name,
@@ -1774,19 +2095,20 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
                     "}", "", "fn ixsome_%s(s: &S) -> Result<bool, StepError> {" % ix.name,
                     "    Ok(s.ix_%s.front(0).is_some())" % ix.name, "}", ""]
         cls = "ixclsno_%s(&ixcls_%s(s, n)?)" % (ix.name, ix.name) if "cls" in ix.eqs else "0"
-        key = "ixkey_%s(s, n)?" % ix.name if "key" in ix.eqs else "0"
+        key = {"least": "i128::from(v)", "key": "ixkey_%s(s, n)?" % ix.name}.get(ix.order, "s.ix_%s.stamp(v)?" % ix.name)
         out += ["fn ixrefresh_%s(s: &mut S, v: u32) -> Result<(), StepError> {" % ix.name,
                 "    let n = %s(v);" % it,
                 "    if ixmem_%s(s, n)? {" % ix.name,
                 "        let (c, k) = (%s, %s);" % (cls, key),
-                "        s.ix_%s.refresh(v, true, c, k)" % ix.name,
-                "    } else {", "        s.ix_%s.refresh(v, false, 0, 0)" % ix.name, "    }", "}", ""]
+                "        s.ix_%s.refresh(v, c, k)" % ix.name,
+                "    } else {", "        s.ix_%s.remove(v);" % ix.name, "        Ok(())", "    }", "}", ""]
     sorts = sorted({ix.sort for ix in st.indexes} | set(st.watched.values()))
-    out += ["/// The indexes refreshed at the ids the last summand wrote (docs/spec.md §3.8.3).",
+    out += ["/// The indexes refreshed at the ids the last summand wrote, in ascending order",
+            "/// (docs/spec.md §3.8.3).",
             "fn refresh(s: &mut S) -> Result<(), StepError> {"]
     for srt in sorts:
-        out += ["    let d = std::mem::take(&mut s.dirty_%s);" % srt, "    let mut seen = BTreeSet::new();",
-                "    for v in d {", "        if !seen.insert(v) {", "            continue;", "        }"]
+        out += ["    let d: BTreeSet<u32> = std::mem::take(&mut s.dirty_%s).into_iter().collect();" % srt,
+                "    for v in d {"]
         out += ["        ixrefresh_%s(s, v)?;" % ix.name for ix in st.indexes if ix.sort == srt]
         out += ["    }"]
     out += ["    Ok(())", "}", ""]
@@ -1806,7 +2128,7 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
         out += _emit_summand(em, m, s, "_s%d" % k, fps, st.watched)
     pscope = {}
     for n, _ in lps.params:
-        pscope[n] = ("(&s.%s)" % ident(n), "ref") if n in fps else ("s.%s" % ident(n), "val")
+        pscope[n] = em.param_scope(n, fps)
     outs = []
     for j, k in enumerate(st.outputs):
         s = lps.summands[k]
@@ -1831,7 +2153,12 @@ def _emit_stepper(em: Emitter, model, st, inputs, outputs) -> list:
     out += ["fn state_bytes(s: &S, out: &mut Vec<u8>) {"]
     for n, srt in lps.params:
         t = em.types.resolve(srt)
-        if t[0] == "->":
+        if n in em.adjs:
+            out += ["    {", "        let f = &s.%s;" % ident(n)] + em.enc_stmt(t[2], "&f.d", "        ") + \
+                   ["        let ents = f.entries();", "        codec::len(ents.len(), out);", "        for (k, v) in ents.iter() {",
+                    "            let k = &%s(*k);" % type_name(em.types.resolve(t[1][0])[1])] + \
+                   em.enc_stmt(t[1][0], "k", "            ") + em.enc_stmt(t[2], "v", "            ") + ["        }", "    }"]
+        elif t[0] == "->":
             out += ["    {", "        let f = &s.%s;" % ident(n)] + em.enc_stmt(t[2], "&f.d", "        ") + \
                    ["        codec::len(f.m.len(), out);", "        for (k, v) in f.m.iter() {"] + \
                    em.enc_stmt(t[1][0], "k", "            ") + em.enc_stmt(t[2], "v", "            ") + ["        }", "    }"]
