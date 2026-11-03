@@ -8,6 +8,7 @@
 """The model's generated code as Python (docs/spec.md §3.12)."""
 
 import heapq
+from collections import deque
 
 class StepError(Exception):
     """An error of the generated code (docs/spec.md §3.14.2)."""
@@ -55,16 +56,64 @@ def _least(w):
     return min(w)
 
 
+def _dq_head(q):
+    """The head of a queue parameter (repr deque)."""
+    if not q:
+        raise Undefined("head")
+    return q[0]
+
+
+# Whether the state being stepped audits (docs/spec.md §3.9.9): set by _stepper_init.
+_AUDIT = [False]
+
+
+def _place(t, u):
+    """The least i with t[i] >= u in a tuple sorted by id: a binary search."""
+    lo, hi = 0, len(t)
+    if hi and t[hi - 1] < u:
+        return hi
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if t[mid] < u:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def _ins_sorted(u, t, walk):
+    """An ordered insert into a tuple sorted by id (docs/spec.md §3.10.6), at the place
+    a binary search finds; with the audit on, checked against the model's walk."""
+    i = _place(t, u)
+    r = t if i < len(t) and t[i] == u else t[:i] + (u,) + t[i:]
+    if _AUDIT[0] and r != walk(u, t):
+        raise AuditFailed("an ordered insert differs from the model's walk")
+    return r
+
+
+def _merge_sorted(l, t, walk):
+    """An ordered merge of l into a tuple sorted by id (docs/spec.md §3.10.6)."""
+    r = t
+    for u in l:
+        i = _place(r, u)
+        if not (i < len(r) and r[i] == u):
+            r = r[:i] + (u,) + r[i:]
+    if _AUDIT[0] and r != walk(l, t):
+        raise AuditFailed("an ordered merge differs from the model's walk")
+    return r
+
+
 class _Index:
     """An index of the policy (docs/spec.md §3.7.6, §3.10.3): per class a heap
     of (order key, id) with lazy deletion; an entry is valid while its id is a
     member of that class with that order key. Order keys: the id (least), the
-    key's value (key), minus the entry stamp (newest), the stamp (oldest)."""
+    key's value (key), minus the entry stamp (newest), the stamp (oldest), the
+    order key of the index it is within (within)."""
 
     __slots__ = ("order", "ent", "heaps", "stamp")
 
     def __init__(self, order, ncls):
-        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest
+        self.order = order  # 0 least, 1 key, 2 newest, 3 oldest, 4 within
         self.ent = {}  # id -> (class, order key)
         self.heaps = [[] for _ in range(ncls)]
         self.stamp = 0
@@ -78,7 +127,7 @@ class _Index:
         o = self.order
         if o == 0:
             ok = v
-        elif o == 1:
+        elif o in (1, 4):
             ok = k
         elif old is not None:
             ok = old[1]  # a member keeps its stamp, across a change of class too
@@ -405,7 +454,7 @@ ACT_TELL = 2
 def _match0(s, a):
     # c_open
     v_k = a[0]
-    if not (((v_k < 4) and ((s.nt < s.cap) and (s.made.get(((v_k % 2), (() if (v_k < 2) else (((v_k, (v_k // 2),),) + ())),)) == 0)))):
+    if not (((v_k < 4) and ((s.nt < s.cap) and (s.made.get(_m_keyof(v_k)) == 0)))):
         return None
     return (v_k, )
 
@@ -418,9 +467,9 @@ def _fire0(s, env):
     _p_st = []
     _p_st.append((0, s.nt, 1))
     _p_rank = []
-    _p_rank.append((0, s.nt, (((v_k,) + ()) if (v_k < 2) else (((v_k % 2),) + ((s.nt,) + ())))))
+    _p_rank.append((0, s.nt, _m_rankof(v_k, s.nt)))
     _p_made = []
-    _p_made.append((0, ((v_k % 2), (() if (v_k < 2) else (((v_k, (v_k // 2),),) + ())),), (s.nt + 1)))
+    _p_made.append((0, _m_keyof(v_k), (s.nt + 1)))
     _run(s.label, _p_label)
     _run(s.st, _p_st)
     _run(s.rank, _p_rank)
@@ -432,7 +481,7 @@ def _match1(s, a):
     # c_need
     v_x = a[0]
     v_y = a[1]
-    if not (((s.st.get(v_x) == 2) and ((not (v_x == v_y)) and ((v_y < s.nt) and (not (s.st.get(v_y) == 0)))))):
+    if not (((s.st.get(v_x) == 2) and ((v_x != v_y) and ((v_y < s.nt) and (s.st.get(v_y) != 0))))):
         return None
     return (v_x, v_y, )
 
@@ -486,7 +535,7 @@ def _match4(s, a):
     # c_tell
     v_v = a[0]
     v_x = a[1]
-    if not (((s.st.get(v_x) == 4) and ((not (s.waiters.get(v_x) == ())) and (v_v == _head(s.waiters.get(v_x)))))):
+    if not (((s.st.get(v_x) == 4) and ((s.waiters.get(v_x) != ()) and (v_v == _head(s.waiters.get(v_x)))))):
         return None
     return (v_x, v_v, )
 
@@ -503,7 +552,7 @@ def _fire4(s, env):
     _p_waiters.append((0, v_x, _tail(s.waiters.get(v_x))))
     _p_missing = []
     _p_missing.append((0, v_v, _int2nat((s.missing.get(v_v) - 1))))
-    _n_depth = ((len(_tail(s.waiters.get(v_x))) + 1) if (max(0, s.depth - 1) <= len(_tail(s.waiters.get(v_x)))) else s.depth)
+    _n_depth = max(s.depth, len(((v_v,) + _tail(s.waiters.get(v_x)))))
     _run(s.st, _p_st)
     _run(s.waiters, _p_waiters)
     _run(s.missing, _p_missing)
@@ -527,7 +576,7 @@ def _fire5(s, env):
     _p_rank = []
     _p_rank.append((0, v_x, ()))
     _p_made = []
-    _p_made.append((0, ((s.label.get(v_x) % 2), (() if (s.label.get(v_x) < 2) else (((s.label.get(v_x), (s.label.get(v_x) // 2),),) + ())),), 0))
+    _p_made.append((0, _m_keyof(s.label.get(v_x)), 0))
     _run(s.label, _p_label)
     _run(s.st, _p_st)
     _run(s.rank, _p_rank)
@@ -727,7 +776,7 @@ def _audit(s):
 def _match_s0(s, a):
     # c_open
     v_k = a[0]
-    if not (((v_k < 4) and ((s.nt < s.cap) and (s.made.get(((v_k % 2), (() if (v_k < 2) else (((v_k, (v_k // 2),),) + ())),)) == 0)))):
+    if not (((v_k < 4) and ((s.nt < s.cap) and (s.made.get(_m_keyof(v_k)) == 0)))):
         return None
     return (v_k, )
 
@@ -740,9 +789,9 @@ def _fire_s0(s, env):
     _p_st = []
     _p_st.append((0, s.nt, 1))
     _p_rank = []
-    _p_rank.append((0, s.nt, (((v_k,) + ()) if (v_k < 2) else (((v_k % 2),) + ((s.nt,) + ())))))
+    _p_rank.append((0, s.nt, _m_rankof(v_k, s.nt)))
     _p_made = []
-    _p_made.append((0, ((v_k % 2), (() if (v_k < 2) else (((v_k, (v_k // 2),),) + ())),), (s.nt + 1)))
+    _p_made.append((0, _m_keyof(v_k), (s.nt + 1)))
     _run(s.label, _p_label)
     _run(s.st, _p_st)
     _run(s.rank, _p_rank)
@@ -754,7 +803,7 @@ def _match_s1(s, a):
     # c_need
     v_x = a[0]
     v_y = a[1]
-    if not (((s.st.get(v_x) == 2) and ((not (v_x == v_y)) and ((v_y < s.nt) and (not (s.st.get(v_y) == 0)))))):
+    if not (((s.st.get(v_x) == 2) and ((v_x != v_y) and ((v_y < s.nt) and (s.st.get(v_y) != 0))))):
         return None
     return (v_x, v_y, )
 
@@ -806,7 +855,7 @@ def _fire_s3(s, env):
 
 def _out0(s, out):
     # c_tell
-    if not ((_ixsome_telling(s) and ((s.st.get(_ixfirst_telling(s)) == 4) and (not (s.waiters.get(_ixfirst_telling(s)) == ()))))):
+    if not ((_ixsome_telling(s) and ((s.st.get(_ixfirst_telling(s)) == 4) and (s.waiters.get(_ixfirst_telling(s)) != ())))):
         return False
     out.append((2, _head(s.waiters.get(_ixfirst_telling(s))), _ixfirst_telling(s),))
     _p_st = []
@@ -819,7 +868,7 @@ def _out0(s, out):
     _p_waiters.append((0, _ixfirst_telling(s), _tail(s.waiters.get(_ixfirst_telling(s)))))
     _p_missing = []
     _p_missing.append((0, _head(s.waiters.get(_ixfirst_telling(s))), _int2nat((s.missing.get(_head(s.waiters.get(_ixfirst_telling(s)))) - 1))))
-    _n_depth = ((len(_tail(s.waiters.get(_ixfirst_telling(s)))) + 1) if (max(0, s.depth - 1) <= len(_tail(s.waiters.get(_ixfirst_telling(s))))) else s.depth)
+    _n_depth = max(s.depth, len(((_head(s.waiters.get(_ixfirst_telling(s))),) + _tail(s.waiters.get(_ixfirst_telling(s))))))
     _run(s.st, _p_st)
     _run(s.waiters, _p_waiters)
     _run(s.missing, _p_missing)
@@ -839,7 +888,7 @@ def _out1(s, out):
     _p_rank = []
     _p_rank.append((0, _ixfirst_droppable(s), ()))
     _p_made = []
-    _p_made.append((0, ((s.label.get(_ixfirst_droppable(s)) % 2), (() if (s.label.get(_ixfirst_droppable(s)) < 2) else (((s.label.get(_ixfirst_droppable(s)), (s.label.get(_ixfirst_droppable(s)) // 2),),) + ())),), 0))
+    _p_made.append((0, _m_keyof(s.label.get(_ixfirst_droppable(s))), 0))
     _run(s.label, _p_label)
     _run(s.st, _p_st)
     _run(s.rank, _p_rank)
@@ -908,6 +957,7 @@ def _state_bytes(s):
 
 def _stepper_init(s, audit):
     s._audit = audit
+    _AUDIT[0] = audit
     s._d_Task = []
     s.rank.w = s._d_Task
     s.st.w = s._d_Task

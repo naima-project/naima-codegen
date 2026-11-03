@@ -634,7 +634,7 @@ export function mcrl2Label(entry: Entry): string {
 function _match0(s: V, a: V[]): V[] | null {
   // c_open
   const v_k = a[0];
-  if (!(((v_k < 4) && ((s.nt < s.cap) && (s.made.get([_mod(v_k, 2), ((v_k < 2) ? [] : [[v_k, _div(v_k, 2)], ...[]])]) === 0))))) return null;
+  if (!(((v_k < 4) && ((s.nt < s.cap) && (s.made.get(_m_keyof(v_k)) === 0))))) return null;
   return [v_k];
 }
 
@@ -646,9 +646,9 @@ function _fire0(s: V, env: V[]): void {
   const _p_st: V[] = [];
   _p_st.push([0, s.nt, "Queued"]);
   const _p_rank: V[] = [];
-  _p_rank.push([0, s.nt, ((v_k < 2) ? [v_k, ...[]] : [_mod(v_k, 2), ...[s.nt, ...[]]])]);
+  _p_rank.push([0, s.nt, _m_rankof(v_k, s.nt)]);
   const _p_made: V[] = [];
-  _p_made.push([0, [_mod(v_k, 2), ((v_k < 2) ? [] : [[v_k, _div(v_k, 2)], ...[]])], _add(s.nt, 1)]);
+  _p_made.push([0, _m_keyof(v_k), _add(s.nt, 1)]);
   s.label = _run(s.label.clone(), _p_label);
   s.st = _run(s.st.clone(), _p_st);
   s.rank = _run(s.rank.clone(), _p_rank);
@@ -660,7 +660,7 @@ function _match1(s: V, a: V[]): V[] | null {
   // c_need
   const v_x = a[0];
   const v_y = a[1];
-  if (!(((s.st.get(v_x) === "Running") && ((!(v_x === v_y)) && ((v_y < s.nt) && (!(s.st.get(v_y) === "Free"))))))) return null;
+  if (!(((s.st.get(v_x) === "Running") && ((v_x !== v_y) && ((v_y < s.nt) && (s.st.get(v_y) !== "Free")))))) return null;
   return [v_x, v_y];
 }
 
@@ -711,7 +711,7 @@ function _match4(s: V, a: V[]): V[] | null {
   // c_tell
   const v_v = a[0];
   const v_x = a[1];
-  if (!(((s.st.get(v_x) === "Done") && ((!_eq(s.waiters.get(v_x), [])) && (v_v === _head(s.waiters.get(v_x))))))) return null;
+  if (!(((s.st.get(v_x) === "Done") && (!_eq(s.waiters.get(v_x), []) && (v_v === _head(s.waiters.get(v_x))))))) return null;
   return [v_x, v_v];
 }
 
@@ -726,7 +726,7 @@ function _fire4(s: V, env: V[]): void {
   _p_waiters.push([0, v_x, _tail(s.waiters.get(v_x))]);
   const _p_missing: V[] = [];
   _p_missing.push([0, v_v, _int2nat(_sub(s.missing.get(v_v), 1))]);
-  const _n_depth = ((Math.max(0, _sub(s.depth, 1)) <= _tail(s.waiters.get(v_x)).length) ? _add(_tail(s.waiters.get(v_x)).length, 1) : s.depth);
+  const _n_depth = Math.max(s.depth, [v_v, ..._tail(s.waiters.get(v_x))].length);
   s.st = _run(s.st.clone(), _p_st);
   s.waiters = _run(s.waiters.clone(), _p_waiters);
   s.missing = _run(s.missing.clone(), _p_missing);
@@ -749,7 +749,7 @@ function _fire5(s: V, env: V[]): void {
   const _p_rank: V[] = [];
   _p_rank.push([0, v_x, []]);
   const _p_made: V[] = [];
-  _p_made.push([0, [_mod(s.label.get(v_x), 2), ((s.label.get(v_x) < 2) ? [] : [[s.label.get(v_x), _div(s.label.get(v_x), 2)], ...[]])], 0]);
+  _p_made.push([0, _m_keyof(s.label.get(v_x)), 0]);
   s.label = _run(s.label.clone(), _p_label);
   s.st = _run(s.st.clone(), _p_st);
   s.rank = _run(s.rank.clone(), _p_rank);
@@ -916,7 +916,7 @@ function _stepper_init(s: V): void {
 function _match_s0(s: V, a: V[]): V[] | null {
   // c_open
   const v_k = a[0];
-  if (!(((v_k < 4) && ((s.nt < s.cap) && (s.made.get([_mod(v_k, 2), ((v_k < 2) ? [] : [[v_k, _div(v_k, 2)], ...[]])]) === 0))))) return null;
+  if (!(((v_k < 4) && ((s.nt < s.cap) && (s.made.get(_m_keyof(v_k)) === 0))))) return null;
   return [v_k];
 }
 
@@ -928,9 +928,9 @@ function _fire_s0(s: V, env: V[]): void {
   const _p_st: V[] = [];
   _p_st.push([0, s.nt, "Queued"]);
   const _p_rank: V[] = [];
-  _p_rank.push([0, s.nt, ((v_k < 2) ? [v_k, ...[]] : [_mod(v_k, 2), ...[s.nt, ...[]]])]);
+  _p_rank.push([0, s.nt, _m_rankof(v_k, s.nt)]);
   const _p_made: V[] = [];
-  _p_made.push([0, [_mod(v_k, 2), ((v_k < 2) ? [] : [[v_k, _div(v_k, 2)], ...[]])], _add(s.nt, 1)]);
+  _p_made.push([0, _m_keyof(v_k), _add(s.nt, 1)]);
   s.label = _run(s.label.clone(), _p_label);
   s.st = _run(s.st.clone(), _p_st);
   s.rank = _run(s.rank.clone(), _p_rank);
@@ -942,7 +942,7 @@ function _match_s1(s: V, a: V[]): V[] | null {
   // c_need
   const v_x = a[0];
   const v_y = a[1];
-  if (!(((s.st.get(v_x) === "Running") && ((!(v_x === v_y)) && ((v_y < s.nt) && (!(s.st.get(v_y) === "Free"))))))) return null;
+  if (!(((s.st.get(v_x) === "Running") && ((v_x !== v_y) && ((v_y < s.nt) && (s.st.get(v_y) !== "Free")))))) return null;
   return [v_x, v_y];
 }
 
@@ -991,7 +991,7 @@ function _fire_s3(s: V, env: V[]): void {
 
 function _out0(s: V, out: Action[]): boolean {
   // c_tell
-  if (!((_ixsome_telling(s) && ((s.st.get(_ixfirst_telling(s)) === "Done") && (!_eq(s.waiters.get(_ixfirst_telling(s)), [])))))) return false;
+  if (!((_ixsome_telling(s) && ((s.st.get(_ixfirst_telling(s)) === "Done") && !_eq(s.waiters.get(_ixfirst_telling(s)), []))))) return false;
   out.push({ type: "tell", waiter: _head(s.waiters.get(_ixfirst_telling(s))), task: _ixfirst_telling(s) });
   const _p_st: V[] = [];
   if ((s.missing.get(_head(s.waiters.get(_ixfirst_telling(s)))) === 1)) {
@@ -1002,7 +1002,7 @@ function _out0(s: V, out: Action[]): boolean {
   _p_waiters.push([0, _ixfirst_telling(s), _tail(s.waiters.get(_ixfirst_telling(s)))]);
   const _p_missing: V[] = [];
   _p_missing.push([0, _head(s.waiters.get(_ixfirst_telling(s))), _int2nat(_sub(s.missing.get(_head(s.waiters.get(_ixfirst_telling(s)))), 1))]);
-  const _n_depth = ((Math.max(0, _sub(s.depth, 1)) <= _tail(s.waiters.get(_ixfirst_telling(s))).length) ? _add(_tail(s.waiters.get(_ixfirst_telling(s))).length, 1) : s.depth);
+  const _n_depth = Math.max(s.depth, [_head(s.waiters.get(_ixfirst_telling(s))), ..._tail(s.waiters.get(_ixfirst_telling(s)))].length);
   s.st = _run(s.st.clone(), _p_st);
   s.waiters = _run(s.waiters.clone(), _p_waiters);
   s.missing = _run(s.missing.clone(), _p_missing);
@@ -1021,7 +1021,7 @@ function _out1(s: V, out: Action[]): boolean {
   const _p_rank: V[] = [];
   _p_rank.push([0, _ixfirst_droppable(s), []]);
   const _p_made: V[] = [];
-  _p_made.push([0, [_mod(s.label.get(_ixfirst_droppable(s)), 2), ((s.label.get(_ixfirst_droppable(s)) < 2) ? [] : [[s.label.get(_ixfirst_droppable(s)), _div(s.label.get(_ixfirst_droppable(s)), 2)], ...[]])], 0]);
+  _p_made.push([0, _m_keyof(s.label.get(_ixfirst_droppable(s))), 0]);
   s.label = _run(s.label.clone(), _p_label);
   s.st = _run(s.st.clone(), _p_st);
   s.rank = _run(s.rank.clone(), _p_rank);

@@ -253,8 +253,10 @@ option is passed.
 matter), the generated code gives such a parameter the default value of its sort
 (§3.10.2).
 
-3.2.6. Rewriter normal forms. Since data rewriting stays on (§3.2.3), a condition
-or a next-state assignment holds the rewriter's normal form of what the model wrote,
+3.2.6. Rewriter normal forms. With `-o` (§3.2.3) the linearisation does not rewrite,
+so the generator's own LPS holds the terms as the model wrote them; an LPS linearised
+with rewriting on (as before `-o`, or rewritten afterwards) holds instead, in a condition
+or a next-state assignment, the rewriter's normal form of what the model wrote,
 and the normal form of an accepted operator (§3.4.1) may use operators internal to
 the toolset's `Pos`, `Nat` and `Int`, whose names start with `@`. Found on
 2026-11-01: a model's `#(e |> l)` became `@succ_nat(#l)`, and `Int2Nat(o - 1)`, with

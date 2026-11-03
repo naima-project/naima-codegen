@@ -13,3 +13,7 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+# The firing hook (docs/spec.md §3.11.6): the output loop posts each fire's summand.
+firing = []

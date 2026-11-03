@@ -26,6 +26,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -33,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import codegen_ts as ts  # noqa: E402
 from codegen_values import parse_printed, to_python  # noqa: E402
-from naima_codegen import pyback, rustback, tsback  # noqa: E402
+from naima_codegen import pyback, rustback, toolchain, tsback  # noqa: E402
 from naima_codegen.expr import App, Op, walk  # noqa: E402
 from naima_codegen.frontend import run  # noqa: E402
 from naima_codegen.lower import Types  # noqa: E402
@@ -129,7 +130,10 @@ class FormsAndListOrder(unittest.TestCase):
         if not _pinned():
             raise unittest.SkipTest("the pinned mCRL2 toolset %s is not installed" % PIN)
         cls.root = _forms_root()
-        cls.model = run(cls.root)
+        # Linearised with rewriting on, as an LPS may be (§3.2.6): the generator's own -o
+        # (§3.2.3) leaves no normal forms to translate.
+        with mock.patch.object(toolchain, "LINEARISE", [x for x in toolchain.LINEARISE if x != "-o"]):
+            cls.model = run(cls.root)
         cls.types = Types(cls.model.lps, cls.model.config.id_sorts)
         rnd = random.Random(20261101)
         cls.events = [(rnd.randrange(4), rnd.randrange(4), 1 + rnd.randrange(3), 1 + rnd.randrange(3), rnd.randrange(-2, 3),

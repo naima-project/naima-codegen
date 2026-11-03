@@ -71,6 +71,11 @@ impl<K: Ord + Clone> Ix<K> {
         }
     }
 
+    /// The order key of a member (an index within this one takes it, §3.7.6).
+    pub fn key_of(&self, v: u32) -> Result<K, StepError> {
+        self.ent.get(&v).map(|e| e.1.clone()).ok_or(StepError::Undefined("index within: not a member of the outer index"))
+    }
+
     /// The first (order key, id) of one class.
     pub fn front(&self, c: usize) -> Option<(K, u32)> {
         self.sets.get(c).and_then(|set| set.first().cloned())
@@ -115,18 +120,40 @@ pub trait Get<K, V> {
 pub trait GetSet<K, V>: Get<K, V> {
     fn set(&mut self, k: K, v: V);
     fn as_get(&self) -> &dyn Get<K, V>;
+    /// The value at k, to change in place (a sorted list's insert, docs/spec.md §3.10.6).
+    fn slot(&mut self, k: K) -> &mut V;
+    /// After a change in place: the entry at k dropped when it is the default again, so that
+    /// equal functions have equal entries (docs/spec.md §3.10.7).
+    fn tidy(&mut self, _k: &K) {}
 }
 
-/// A stored function: a default and the entries that differ from it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A function's key (docs/spec.md §3.11.5): an id is held densely, by its index, any
+/// other key sparsely.
+pub trait FunKey: Ord + Clone {
+    fn dense(&self) -> Option<usize> {
+        None
+    }
+    fn undense(_i: usize) -> Option<Self> {
+        None
+    }
+}
+
+impl FunKey for i128 {}
+impl FunKey for bool {}
+
+/// A stored function: a default and the entries that differ from it, those at an id
+/// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
+/// others in a map.
+#[derive(Debug, Clone)]
 pub struct Fun<K: Ord, V> {
     d: V,
     m: BTreeMap<K, V>,
+    v: Vec<V>,
 }
 
-impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
-        Fun { d, m: BTreeMap::new() }
+        Fun { d, m: BTreeMap::new(), v: Vec::new() }
     }
     pub fn from_parts(d: V, kv: Vec<(K, V)>) -> Self {
         let mut f = Fun::new(d);
@@ -135,30 +162,86 @@ impl<K: Ord, V: Clone + PartialEq> Fun<K, V> {
         }
         f
     }
+    /// The default.
+    pub fn default_value(&self) -> &V {
+        &self.d
+    }
+    /// The entries that differ from the default, in key order.
+    pub fn entries(&self) -> Vec<(K, &V)> {
+        let mut out: Vec<(K, &V)> = self.m.iter().map(|(k, v)| (k.clone(), v)).collect();
+        for (i, x) in self.v.iter().enumerate() {
+            if *x != self.d {
+                if let Some(k) = K::undense(i) {
+                    out.push((k, x));
+                }
+            }
+        }
+        out
+    }
 }
 
-impl<K: Ord, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> PartialEq for Fun<K, V> {
+    fn eq(&self, o: &Self) -> bool {
+        self.d == o.d && self.entries() == o.entries()
+    }
+}
+
+impl<K: FunKey, V: Clone + PartialEq + Eq> Eq for Fun<K, V> {}
+
+impl<K: FunKey, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     fn get(&self, k: &K) -> V {
-        match self.m.get(k) {
-            Some(v) => v.clone(),
-            None => self.d.clone(),
-        }
+        self.get_ref(k).clone()
     }
     fn get_ref(&self, k: &K) -> &V {
-        self.m.get(k).unwrap_or(&self.d)
+        match k.dense() {
+            Some(i) => self.v.get(i).unwrap_or(&self.d),
+            None => self.m.get(k).unwrap_or(&self.d),
+        }
     }
 }
 
-impl<K: Ord, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
+impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
-        if v == self.d {
-            self.m.remove(&k);
-        } else {
-            self.m.insert(k, v);
+        match k.dense() {
+            Some(i) => {
+                if i >= self.v.len() {
+                    if v == self.d {
+                        return;
+                    }
+                    self.v.resize(i.saturating_add(1), self.d.clone());
+                }
+                if let Some(x) = self.v.get_mut(i) {
+                    *x = v;
+                }
+            }
+            None => {
+                if v == self.d {
+                    self.m.remove(&k);
+                } else {
+                    self.m.insert(k, v);
+                }
+            }
         }
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
+    }
+    fn slot(&mut self, k: K) -> &mut V {
+        if let Some(i) = k.dense() {
+            if i >= self.v.len() {
+                self.v.resize(i.saturating_add(1), self.d.clone());
+            }
+            if let Some(x) = self.v.get_mut(i) {
+                return x;
+            }
+        }
+        let d = &self.d;
+        self.m.entry(k).or_insert_with(|| d.clone())
+    }
+    fn tidy(&mut self, k: &K) {
+        if k.dense().is_none() && self.m.get(k) == Some(&self.d) {
+            self.m.remove(k);
+        }
     }
 }
 
@@ -198,6 +281,10 @@ impl<K: Ord, V: Clone> GetSet<K, V> for Ov<'_, K, V> {
     }
     fn as_get(&self) -> &dyn Get<K, V> {
         self
+    }
+    fn slot(&mut self, k: K) -> &mut V {
+        let b = self.b;
+        self.m.entry(k).or_insert_with_key(|k| b.get(k))
     }
 }
 
@@ -513,6 +600,46 @@ mod rt {
     pub fn least<X: Ord + Clone>(s: &BTreeSet<X>) -> Result<X, StepError> {
         s.first().cloned().ok_or(StepError::Undefined("least of an empty set"))
     }
+    /// An ordered insert into a list sorted by id (docs/spec.md §3.10.6): the
+    /// model's walk, at the place a binary search finds.
+    pub fn ins_sorted<X: Ord>(l: &mut Vec<X>, u: X) {
+        if let Err(p) = l.binary_search(&u) {
+            l.insert(p, u);
+        }
+    }
+    /// An insert ordered by a key, into a list kept sorted by that key (docs/spec.md
+    /// §3.10.7): the model's walk puts u before the first element whose key is greater,
+    /// the place a binary search finds.
+    pub fn ins_by_key<X, K: Ord>(l: &mut Vec<X>, u: X, key: impl Fn(&X) -> K) {
+        let ku = key(&u);
+        let p = l.partition_point(|x| key(x) <= ku);
+        l.insert(p, u);
+    }
+    /// tail of a list entry, in place.
+    pub fn pop_first<X>(l: &mut Vec<X>) -> Result<(), StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        l.remove(0);
+        Ok(())
+    }
+    /// The removal of u's first occurrence, in place.
+    pub fn rem_first<X: PartialEq>(l: &mut Vec<X>, u: &X) {
+        if let Some(p) = l.iter().position(|x| x == u) {
+            l.remove(p);
+        }
+    }
+    /// tail(l) == [], read in place.
+    pub fn tail_empty<X>(l: &[X]) -> Result<bool, StepError> {
+        if l.is_empty() {
+            return Err(StepError::Undefined("tail"));
+        }
+        Ok(l.len() == 1)
+    }
+    /// l with u's first occurrence removed == [], read in place.
+    pub fn rem_empty<X: PartialEq>(l: &[X], u: &X) -> bool {
+        l.is_empty() || (l.len() == 1 && l.first() == Some(u))
+    }
 }
 
 /// A malformed entry (docs/spec.md §3.14.2).
@@ -648,6 +775,8 @@ impl<X: M2> M2 for BTreeSet<X> {
         out.push('}');
     }
 }
+
+impl FunKey for Phase {}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Copy)]
 pub enum Phase {
@@ -1031,6 +1160,8 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
     if !(s.queued.clone()) {
         return Ok(false);
     }
+    #[cfg(feature = "firing")]
+    FIRING.store(1, core::sync::atomic::Ordering::Relaxed);
     let act = Action::Send(rt::add(s.tries.clone(), 1i128)?);
     let n_queued = false;
     s.queued = n_queued;
@@ -1039,6 +1170,26 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 }
 
 const OUTS: [fn(&mut S, &mut Vec<Action>) -> Result<bool, StepError>; 1] = [out0];
+
+/// The output summands' labels, in policy order (docs/spec.md §3.11.6).
+pub const OUTPUT_LABELS: [&str; 1] = ["c_send"];
+
+/// The index plus one, in [`OUTPUT_LABELS`], of the output summand fired last; 0:
+/// none (docs/spec.md §3.11.6). Process-wide; written only with the feature `firing`.
+#[cfg(feature = "firing")]
+pub static FIRING: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// The label of the output summand fired last, read from any thread; `None`
+/// without the feature `firing` or before the first fire (docs/spec.md §3.11.6).
+pub fn firing() -> Option<&'static str> {
+    #[cfg(feature = "firing")]
+    {
+        let i = FIRING.load(core::sync::atomic::Ordering::Relaxed);
+        return usize::try_from(i).ok().and_then(|i| i.checked_sub(1)).and_then(|i| OUTPUT_LABELS.get(i)).copied();
+    }
+    #[cfg(not(feature = "firing"))]
+    None
+}
 
 /// The output loop (docs/spec.md §3.8.3): the first enabled output in policy
 /// order, until none is.
