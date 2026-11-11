@@ -17,7 +17,7 @@ REPRS = ("bitset", "adj-fixed", "adj-append", "deque")
 KINDS = ("input", "output")
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*$")
 
-_TOP = {"mcrl2_version", "parameter", "action", "id_sorts", "constants", "widths", "observable", "project", "systems", "cost_known", "bytes_per_id", "key_sorted"}
+_TOP = {"mcrl2_version", "parameter", "action", "id_sorts", "constants", "widths", "observable", "project", "systems", "cost_known", "bytes_per_id", "key_sorted", "sparse_ids"}
 _PARAM = {"name", "role", "repr", "width", "sort", "init"}
 _ACTION = {"label", "kind", "args"}
 _OBS = {"name", "arg", "sort", "expr"}
@@ -47,6 +47,7 @@ class Config:
     cost_known: list = field(default_factory=list)  # "<summand>: <kind> <parameter>" sites G8 still lets through
     bytes_per_id: dict = field(default_factory=dict)  # id sort -> the limit of its per-id layout (G11, §3.13.4)
     key_sorted: dict = field(default_factory=dict)  # list column -> the key function it is kept sorted by (§3.10.7)
+    sparse_ids: list = field(default_factory=list)  # id sorts whose per-id entries are kept by id, not by index (§3.11.5)
 
 
 def read_config(text: str) -> tuple[Config, list[tuple[str, str, str]]]:
@@ -123,6 +124,13 @@ def read_config(text: str) -> tuple[Config, list[tuple[str, str, str]]]:
         problems.append(("id_sorts", "§3.6.4", "must be a list of sort names"))
     else:
         cfg.id_sorts = list(ids)
+    sparse = data.get("sparse_ids", [])
+    if not isinstance(sparse, list) or not all(isinstance(x, str) for x in sparse):
+        problems.append(("sparse_ids", "§3.6.4", "must be a list of sort names"))
+    elif any(x not in cfg.id_sorts for x in sparse):
+        problems.append(("sparse_ids", "§3.6.4", "must name id sorts only: %s" % ", ".join(x for x in sparse if x not in cfg.id_sorts)))
+    else:
+        cfg.sparse_ids = list(sparse)
 
     consts = data.get("constants", {})
     if not isinstance(consts, dict) or not all(isinstance(v, str) for v in consts.values()):

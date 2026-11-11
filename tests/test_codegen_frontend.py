@@ -223,6 +223,34 @@ class Example(unittest.TestCase):
         self.assertEqual((walks, fun_maps), ({}, {}))
 
 
+class SparseIds(unittest.TestCase):
+    """`sparse_ids` (§3.6.4, §3.11.5): an id sort whose entries are kept by id, so
+    that a function over it holds the live ids only, not an index up to the largest
+    id ever made."""
+
+    def _texts(self, extra):
+        core = (EXAMPLE / "model" / "core.mcrl2").read_text()
+        return core, extra + (EXAMPLE / "codegen.toml").read_text()
+
+    def test_a_sparse_id_sort_is_a_key_like_any_other(self):
+        from naima_codegen.rustback import emit
+        model = check(*self._texts('sparse_ids = ["Job"]\n'), _read(FIX / "jobqueue" / "lps.aterm"), [])
+        lib = next(v for k, v in emit(model).items() if str(k).endswith("lib.rs"))
+        self.assertIn("impl FunKey for Job {}", lib)
+        self.assertNotIn("u32::try_from(i).ok().map(Job)", lib, "no index for Job")
+        dense = check(*self._texts(""), _read(FIX / "jobqueue" / "lps.aterm"), [])
+        lib = next(v for k, v in emit(dense).items() if str(k).endswith("lib.rs"))
+        self.assertIn("u32::try_from(i).ok().map(Job)", lib, "Job by index, as before")
+
+    def test_only_id_sorts_may_be_sparse(self):
+        from naima_codegen.config import read_config
+        _, problems = read_config('sparse_ids = ["Nat"]\nid_sorts = ["Job"]\n')
+        self.assertIn(("sparse_ids", "§3.6.4", "must name id sorts only: Nat"), problems)
+        cfg, problems = read_config('sparse_ids = ["Job"]\nid_sorts = ["Job"]\n')
+        self.assertEqual(cfg.sparse_ids, ["Job"])
+        self.assertFalse([p for p in problems if p[0] == "sparse_ids"])
+
+
 class Projects(unittest.TestCase):
     """A project is a directory; codegen.toml's [project] table places its files (§3.6.9)."""
 

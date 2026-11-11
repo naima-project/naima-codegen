@@ -336,6 +336,9 @@ pub struct Adj<X> {
     free: u32,
     /// Per id (first cell, last cell, length), grown to the largest id written.
     ids: Vec<Option<(u32, u32, u32)>>,
+    /// The same, by id, for an id sort kept sparsely (`sparse_ids`, §3.11.5):
+    /// an id whose list is the default holds no entry.
+    by_id: Option<BTreeMap<u32, (u32, u32, u32)>>,
 }
 
 /// A write of a per-id growing list, applied after the summand's reads (§3.8.4).
@@ -363,11 +366,19 @@ fn adj_at(c: u32) -> usize {
 
 impl<X: Clone + PartialEq> Adj<X> {
     pub fn new(d: Vec<X>) -> Adj<X> {
-        Adj { d, val: Vec::new(), next: Vec::new(), free: ADJ_NIL, ids: Vec::new() }
+        Adj { d, val: Vec::new(), next: Vec::new(), free: ADJ_NIL, ids: Vec::new(), by_id: None }
+    }
+
+    /// The lists of an id sort kept sparsely: an entry per id whose list is not the default.
+    pub fn new_sparse(d: Vec<X>) -> Adj<X> {
+        Adj { by_id: Some(BTreeMap::new()), ..Adj::new(d) }
     }
 
     fn slot(&self, i: u32) -> Option<(u32, u32, u32)> {
-        self.ids.get(adj_at(i)).copied().flatten()
+        match &self.by_id {
+            Some(m) => m.get(&i).copied(),
+            None => self.ids.get(adj_at(i)).copied().flatten(),
+        }
     }
 
     fn link(&self, c: u32) -> u32 {
@@ -406,6 +417,15 @@ impl<X: Clone + PartialEq> Adj<X> {
     }
 
     fn put(&mut self, i: u32, s: (u32, u32, u32)) {
+        if let Some(m) = self.by_id.as_mut() {
+            // an empty list over an empty default is the default: no entry
+            if s.2 == 0 && self.d.is_empty() {
+                m.remove(&i);
+            } else {
+                m.insert(i, s);
+            }
+            return;
+        }
         let k = adj_at(i);
         if self.ids.len() <= k {
             self.ids.resize(k.saturating_add(1), None);
@@ -502,8 +522,11 @@ impl<X: Clone + PartialEq> Adj<X> {
 
     /// The ids whose list differs from the default, ascending, with their lists.
     pub fn entries(&self) -> Vec<(u32, Vec<X>)> {
-        (0..self.ids.len())
-            .filter_map(|k| u32::try_from(k).ok())
+        let ids: Vec<u32> = match &self.by_id {
+            Some(m) => m.keys().copied().collect(),
+            None => (0..self.ids.len()).filter_map(|k| u32::try_from(k).ok()).collect(),
+        };
+        ids.into_iter()
             .map(|i| (i, self.to_vec(i)))
             .filter(|(i, l)| self.slot(*i).is_some() && *l != self.d)
             .collect()
@@ -994,7 +1017,14 @@ class Emitter:
             st = self.lps.structs[name]
             tn = type_name(name)
             shape = t.shape[name]
-            if shape == "id":
+            if shape == "id" and name in self.model.config.sparse_ids:
+                # kept by id (§3.11.5): its functions' entries in their maps, the defaults dropped
+                lines += [derive + ", Default, Copy)]", "pub struct %s(pub u32);" % tn, "",
+                          "impl FunKey for %s {}" % tn, "",
+                          "impl M2 for %s {" % tn, "    fn m2(&self, out: &mut String) {",
+                          '        out.push_str("%s(");' % st.constructors[0][0],
+                          "        out.push_str(&self.0.to_string());", "        out.push(')');", "    }", "}", ""]
+            elif shape == "id":
                 lines += [derive + ", Default, Copy)]", "pub struct %s(pub u32);" % tn, "",
                           "impl FunKey for %s {" % tn, "    fn dense(&self) -> Option<usize> {",
                           "        usize::try_from(self.0).ok()", "    }",
@@ -2132,7 +2162,9 @@ def emit(model, st=None, package: str = "generated", workspace: bool = False) ->
         elif n in model.inits:
             val = "m_gen_init_%s(%s)?" % (ident(n), ", ".join("config.%s.clone()" % ident(c) for c in config))
         elif n in em.adjs:
-            val = "Adj::new(%s)" % em.expr(v.body, {})
+            key = em.types.resolve(sorts[n])[1][0]
+            sparse = em.types.resolve(key)[0] == "id" and em.types.resolve(key)[1] in model.config.sparse_ids
+            val = "Adj::%s(%s)" % ("new_sparse" if sparse else "new", em.expr(v.body, {}))
         else:
             val = em.expr(v, {})
         r = width_range(model, n)
