@@ -558,7 +558,10 @@ output and their arities differ (`c_link` as an input with three arguments and a
 output with two). It then has two `[[action]]` entries, and the front end tells them
 apart by their number of arguments. Any other overloading is G6.
 
-3.6.4. `id_sorts`: the names of the id sorts.
+3.6.4. `id_sorts`: the names of the id sorts. `sparse_ids`, optional: those of them
+whose per-id entries are kept by id rather than by index (§3.11.5), for a sort whose
+ids are made fresh and never reused while few are alive at once; any other name is an
+error.
 
 3.6.5. `[constants]`: the constant maps that may appear (§3.4.3), as a table keyed
 by the constants' names, each value the constant's sort as mCRL2 text.
@@ -1439,7 +1442,14 @@ type's `dense` is its index). An id's entry then costs the size of `V` (a map's 
 costs the key, the value and the map's own nodes, several times that), and reading or
 writing it is an index, not a search: the columns of a model whose ids number in the
 millions (VoxLogicA's deciding part: 78 columns over nodes, 1.49 KB a node as maps)
-stay within a few hundred bytes an id. Two functions are equal when their defaults and
+stay within a few hundred bytes an id. An id sort listed in `sparse_ids` (§3.6.4) is
+held instead like any other key, its entries that differ from the default in the
+map, and so are its per-id growing lists (§3.10.3), an id holding an entry only while
+its list differs from the default: an index grows to the largest id ever written, so
+for ids made fresh and never reused it grows with every id the run made, alive or
+not (VoxLogicA's evaluations: about 200 bytes for each one ever made, a few hundred
+alive at once), while the map holds the live ones only, for a search in place of an
+index. Two functions are equal when their defaults and
 their entries differing from the default are; the state's encoding (§3.16) lists those
 entries in key order, as before.
 
