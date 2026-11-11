@@ -2,8 +2,9 @@
 §3.9.6, §3.9.7), written as mCRL2 text from `model/core.mcrl2` and the policy.
 
 The source summands are read as text (mCRL2 parses them when the result is
-linearised). Each output summand gets its selectors substituted for its free sum
-variables, then its equality-fixed variables substituted (§3.7.2.1); each input
+linearised). Each output summand gets its equality-fixed variables substituted,
+and each variable its policy selects bound once by a `whr` around every
+expression that reads it (§3.7.2.1); each input
 summand gets its equality-fixed variables that are not action arguments
 substituted (§3.7.2.4). The selection operations become the generator's reference
 definitions, maps named `ix_*` (§3.7.4 item 2); an index of order newest or
@@ -49,6 +50,8 @@ class Src:
     cond: str
     action: str  # c_x(args) or c_x
     assigns: list  # (parameter, right side text), in source order
+    binds: list = field(default_factory=list)  # (selected variable, selection term), in policy order
+    whens: list = field(default_factory=list)  # the selections' conditions, in policy order
 
 
 @dataclass
@@ -347,6 +350,8 @@ def refine(core_text: str, policy: Policy, kinds: dict | None = None) -> Refined
     refined_in = [_refine_input(s, g) for s in inputs]
     for r in refined_in + refined_out:
         _upkeep(r, indexes, params, columns, sets, g)
+    for r in refined_out:
+        _bind_once(r, params)
     if problems:
         raise GeneratorError(problems)
 
@@ -463,28 +468,150 @@ def fixed_vars(s: Src) -> set:
 
 
 def _refine_output(s: Src, policy: Policy, ops, g) -> Src:
-    sigma: dict = {}
+    """The output summand with its selected variables kept as variables, each
+    with its selection term in `binds` (a term may read the variables selected
+    before it); `_bind_once` binds them once the upkeep is appended. A term
+    copied in at every occurrence made the refined Core grow with the product of
+    the term's size and its uses: the frame model's admission choice of 4 cases,
+    in 6 summands, was copied 971 times into core-refined.mcrl2, and lps2lts spent
+    229 s compiling the rewriter of a 415-state probe system (2026-11-11)."""
+    binds = []
     whens = []
     cond, action = s.cond, s.action
     rhs = [a for _, a in s.assigns]
     names = [n for n, _ in s.decls]
     for v, term, when in policy.select.get(s.name, []):
-        t = ops(subst(term, sigma))
-        w = ops(subst(when, sigma))
-        sigma[v] = t
+        binds.append((v, ops(term)))
+        w = ops(when)
         if norm(w) != "true":
             whens.append(w)
-    cond = subst(cond, sigma)
-    action = subst(action, sigma)
-    rhs = [subst(a, sigma) for a in rhs]
-    rest = [n for n in names if n not in sigma]
+    selected = {v for v, _ in binds}
+    rest = [n for n in names if n not in selected]
     cond, texts, left = _resolve_equalities(cond, [action] + rhs, rest, g, s.name)
     action, rhs = texts[0], texts[1:]
     if left:
         g("G10", "summand %s" % s.name, "§3.9.1", "refined output with sum variables %s left" % ", ".join(left))
-    if whens:
-        cond = "(%s) && (%s)" % (" && ".join("(%s)" % w for w in whens), cond)
-    return Src(s.kind, s.level, s.label, s.name, [], cond, action, list(zip([n for n, _ in s.assigns], rhs)))
+    return Src(s.kind, s.level, s.label, s.name, [], cond, action, list(zip([n for n, _ in s.assigns], rhs)), binds, whens)
+
+
+def _bind_once(r: Src, params: dict) -> None:
+    """Each expression of r (its condition, each action argument, each right
+    side) that reads a selected variable, under one `whr` per variable it needs:
+    the variables it reads and those their terms read, the first selected
+    outermost, so that each term is written, and evaluated, once per expression.
+    The selections' conditions come first, each outside the bindings of its own
+    selection: a term is evaluated only once its condition holds (`first` of an
+    empty index is undefined; the generated code fails on it). The right side of
+    a function or set parameter stays built from it (§3.9.1): its indices,
+    values, elements and `if` conditions are bound each, not the whole."""
+    terms = dict(r.binds)
+    order = [v for v, _ in r.binds]
+
+    def wrap(e: str) -> str:
+        need: set = set()
+        stack = [x for x in idents(e) if x in terms]
+        while stack:
+            v = stack.pop()
+            if v not in need:
+                need.add(v)
+                stack.extend(x for x in idents(terms[v]) if x in terms)
+        for v in reversed(order):
+            if v in need:
+                e = "(%s whr %s = %s end)" % (e, v, terms[v])
+        return e
+
+    r.cond = wrap(r.cond)
+    if r.whens:
+        r.cond = "(%s) && (%s)" % (" && ".join("(%s)" % wrap(w) for w in r.whens), r.cond)
+    if not r.binds:
+        return
+    k = r.action.find("(")
+    if k > 0:
+        r.action = "%s(%s)" % (r.action[:k], ", ".join(wrap(a) for a in _args(r.action)))
+    out = []
+    for p, a in r.assigns:
+        sort = params.get(p, "")
+        is_set = re.match(r"F?Set\(", sort) is not None
+        if "->" in sort or is_set:
+            spans = _update_leaves(a, p, is_set)
+            for i, j in sorted(spans, reverse=True):
+                a = a[:i] + wrap(a[i:j]) + a[j:]
+            out.append((p, a))
+        else:
+            out.append((p, wrap(a)))
+    r.assigns = out
+
+
+def _update_leaves(rhs: str, p: str, is_set: bool) -> list:
+    """The spans (start, end) of rhs that are read, not built on, in a right side
+    built from p by updates `p[i -> v]` (a column) or `p + {x}`, `p - {x}` (a set)
+    under `if` (as `_written_ids` reads it): each index, value, element and `if`
+    condition, and whatever is not of that shape, whole."""
+    leaves, stack = [], [(0, len(rhs))]
+    while stack:
+        a, b = stack.pop()
+        while a < b and rhs[a].isspace():
+            a += 1
+        while b > a and rhs[b - 1].isspace():
+            b -= 1
+        e = rhs[a:b]
+        while e.startswith("(") and matching(e, 0) == len(e):
+            a, b = a + 1, b - 1
+            e = rhs[a:b]
+        if e.strip() == p:
+            continue
+        m = re.match(r"if\s*\(", e)
+        if m and matching(e, m.end() - 1) == len(e):
+            parts = split_top(e[m.end():-1], ",")
+            if len(parts) == 3:
+                o = a + m.end()
+                c0, c1 = o, o + len(parts[0])
+                t0 = c1 + 1
+                t1 = t0 + len(parts[1])
+                f0 = t1 + 1
+                leaves.append((c0, c1))
+                stack.extend([(f0, f0 + len(parts[2])), (t0, t1)])
+                continue
+        if not is_set and e.endswith("]"):
+            depth, k = 0, len(e) - 1
+            while k >= 0:
+                if e[k] in ")]}":
+                    depth += 1
+                elif e[k] in "([{":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k -= 1
+            parts = split_top(e[k + 1:-1], "->")
+            if k > 0 and len(parts) == 2:
+                i0 = a + k + 1
+                leaves.append((i0, i0 + len(parts[0])))
+                v0 = i0 + len(parts[0]) + 2
+                leaves.append((v0, v0 + len(parts[1])))
+                stack.append((a, a + k))
+                continue
+        if is_set:
+            for sep in (" - ", " + "):
+                parts = split_top(e, sep)
+                if len(parts) != 2:
+                    continue
+                l, r_ = parts[0].strip(), parts[1].strip()
+                r0 = a + len(parts[0]) + len(sep)
+                if r_.startswith("{") and matching(r_, 0) == len(r_) and len(split_top(r_[1:-1], ",")) == 1:
+                    off = r0 + (len(parts[1]) - len(parts[1].lstrip()))
+                    leaves.append((off + 1, off + len(r_) - 1))
+                    stack.append((a, a + len(parts[0])))
+                    break
+                if sep == " + " and l.startswith("{") and matching(l, 0) == len(l) and len(split_top(l[1:-1], ",")) == 1:
+                    off = a + (len(parts[0]) - len(parts[0].lstrip()))
+                    leaves.append((off + 1, off + len(l) - 1))
+                    stack.append((r0, b))
+                    break
+            else:
+                leaves.append((a, b))
+            continue
+        leaves.append((a, b))
+    return leaves
 
 
 def _refine_input(s: Src, g) -> Src:

@@ -1004,18 +1004,18 @@ function _fire_s3(s: V, env: V[]): void {
 
 function _out0(s: V, out: Action[]): boolean {
   // c_tell
-  if (!((_ixsome_telling(s) && ((s.st.get(_ixfirst_telling(s)) === "Done") && !_eq(s.waiters.get(_ixfirst_telling(s)), []))))) return false;
-  out.push({ type: "tell", waiter: _head(s.waiters.get(_ixfirst_telling(s))), task: _ixfirst_telling(s) });
+  if (!((_ixsome_telling(s) && ((w_x_3: V) => ((s.st.get(w_x_3) === "Done") && !_eq(s.waiters.get(w_x_3), [])))(_ixfirst_telling(s))))) return false;
+  out.push({ type: "tell", waiter: ((w_x_1: V) => _head(s.waiters.get(w_x_1)))(_ixfirst_telling(s)), task: ((w_x_2: V) => w_x_2)(_ixfirst_telling(s)) });
   const _p_st: V[] = [];
-  if ((s.missing.get(_head(s.waiters.get(_ixfirst_telling(s)))) === 1)) {
-    _p_st.push([0, _head(s.waiters.get(_ixfirst_telling(s))), "Queued"]);
+  if (((w_x_4: V) => (s.missing.get(_head(s.waiters.get(w_x_4))) === 1))(_ixfirst_telling(s))) {
+    _p_st.push([0, ((w_x_5: V) => _head(s.waiters.get(w_x_5)))(_ixfirst_telling(s)), "Queued"]);
   } else {
   }
   const _p_waiters: V[] = [];
-  _p_waiters.push([0, _ixfirst_telling(s), _tail(s.waiters.get(_ixfirst_telling(s)))]);
+  _p_waiters.push([0, ((w_x_6: V) => w_x_6)(_ixfirst_telling(s)), ((w_x_7: V) => _tail(s.waiters.get(w_x_7)))(_ixfirst_telling(s))]);
   const _p_missing: V[] = [];
-  _p_missing.push([0, _head(s.waiters.get(_ixfirst_telling(s))), _int2nat(_sub(s.missing.get(_head(s.waiters.get(_ixfirst_telling(s)))), 1))]);
-  const _n_depth = Math.max(s.depth, [_head(s.waiters.get(_ixfirst_telling(s))), ..._tail(s.waiters.get(_ixfirst_telling(s)))].length);
+  _p_missing.push([0, ((w_x_8: V) => _head(s.waiters.get(w_x_8)))(_ixfirst_telling(s)), ((w_x_9: V) => _int2nat(_sub(s.missing.get(_head(s.waiters.get(w_x_9))), 1)))(_ixfirst_telling(s))]);
+  const _n_depth = ((w_x_10: V) => Math.max(s.depth, [_head(s.waiters.get(w_x_10)), ..._tail(s.waiters.get(w_x_10))].length))(_ixfirst_telling(s));
   s.st = _run(s.st.clone(), _p_st);
   s.waiters = _run(s.waiters.clone(), _p_waiters);
   s.missing = _run(s.missing.clone(), _p_missing);
@@ -1025,16 +1025,16 @@ function _out0(s: V, out: Action[]): boolean {
 
 function _out1(s: V, out: Action[]): boolean {
   // c_drop
-  if (!((_ixsome_droppable(s) && ((s.st.get(_ixfirst_droppable(s)) === "Done") && _eq(s.waiters.get(_ixfirst_droppable(s)), []))))) return false;
-  out.push({ type: "drop", task: _ixfirst_droppable(s) });
+  if (!((_ixsome_droppable(s) && ((w_x_12: V) => ((s.st.get(w_x_12) === "Done") && _eq(s.waiters.get(w_x_12), [])))(_ixfirst_droppable(s))))) return false;
+  out.push({ type: "drop", task: ((w_x_11: V) => w_x_11)(_ixfirst_droppable(s)) });
   const _p_label: V[] = [];
-  _p_label.push([0, _ixfirst_droppable(s), 0]);
+  _p_label.push([0, ((w_x_13: V) => w_x_13)(_ixfirst_droppable(s)), 0]);
   const _p_st: V[] = [];
-  _p_st.push([0, _ixfirst_droppable(s), "Free"]);
+  _p_st.push([0, ((w_x_14: V) => w_x_14)(_ixfirst_droppable(s)), "Free"]);
   const _p_rank: V[] = [];
-  _p_rank.push([0, _ixfirst_droppable(s), []]);
+  _p_rank.push([0, ((w_x_15: V) => w_x_15)(_ixfirst_droppable(s)), []]);
   const _p_made: V[] = [];
-  _p_made.push([0, _m_keyof(s.label.get(_ixfirst_droppable(s))), 0]);
+  _p_made.push([0, ((w_x_16: V) => _m_keyof(s.label.get(w_x_16)))(_ixfirst_droppable(s)), 0]);
   s.label = _run(s.label.clone(), _p_label);
   s.st = _run(s.st.clone(), _p_st);
   s.rank = _run(s.rank.clone(), _p_rank);
@@ -1044,10 +1044,10 @@ function _out1(s: V, out: Action[]): boolean {
 
 function _out2(s: V, out: Action[]): boolean {
   // c_start
-  if (!((_ixsome_queue(s) && (s.st.get(_ixfirst_queue(s)) === "Queued")))) return false;
-  out.push({ type: "start", task: _ixfirst_queue(s) });
+  if (!((_ixsome_queue(s) && ((w_x_18: V) => (s.st.get(w_x_18) === "Queued"))(_ixfirst_queue(s))))) return false;
+  out.push({ type: "start", task: ((w_x_17: V) => w_x_17)(_ixfirst_queue(s)) });
   const _p_st: V[] = [];
-  _p_st.push([0, _ixfirst_queue(s), "Running"]);
+  _p_st.push([0, ((w_x_19: V) => w_x_19)(_ixfirst_queue(s)), "Running"]);
   s.st = _run(s.st.clone(), _p_st);
   return true;
 }

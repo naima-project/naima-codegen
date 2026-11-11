@@ -930,10 +930,10 @@ function _fire_s2(s: V, env: V[]): void {
 
 function _out0(s: V, out: Action[]): boolean {
   // c_give_up
-  if (!((_ixsome_spent(s) && ((s.st.get(_ixfirst_spent(s)) === "FAILED") && _m_spent(s.tries.get(_ixfirst_spent(s))))))) return false;
-  out.push({ type: "giveUp", job: _ixfirst_spent(s) });
+  if (!((_ixsome_spent(s) && ((w_j_2: V) => ((s.st.get(w_j_2) === "FAILED") && _m_spent(s.tries.get(w_j_2))))(_ixfirst_spent(s))))) return false;
+  out.push({ type: "giveUp", job: ((w_j_1: V) => w_j_1)(_ixfirst_spent(s)) });
   const _p_st: V[] = [];
-  _p_st.push([0, _ixfirst_spent(s), "GAVEUP"]);
+  _p_st.push([0, ((w_j_3: V) => w_j_3)(_ixfirst_spent(s)), "GAVEUP"]);
   const _p_entered: V[] = [];
   _p_entered.push([0, "GAVEUP", _add(s.entered.get("GAVEUP"), 1)]);
   s.st = _run(s.st.clone(), _p_st);
@@ -943,11 +943,11 @@ function _out0(s: V, out: Action[]): boolean {
 
 function _out1(s: V, out: Action[]): boolean {
   // c_retry
-  if (!((_ixsome_retryable(s) && ((s.st.get(_ixfirst_retryable(s)) === "FAILED") && (!_m_spent(s.tries.get(_ixfirst_retryable(s)))))))) return false;
-  out.push({ type: "retry", job: _ixfirst_retryable(s) });
+  if (!((_ixsome_retryable(s) && ((w_j_5: V) => ((s.st.get(w_j_5) === "FAILED") && (!_m_spent(s.tries.get(w_j_5)))))(_ixfirst_retryable(s))))) return false;
+  out.push({ type: "retry", job: ((w_j_4: V) => w_j_4)(_ixfirst_retryable(s)) });
   const _p_st: V[] = [];
-  _p_st.push([0, _ixfirst_retryable(s), "QUEUED"]);
-  const _n_Q = _union(s.Q, _ins([], _ixfirst_retryable(s)));
+  _p_st.push([0, ((w_j_6: V) => w_j_6)(_ixfirst_retryable(s)), "QUEUED"]);
+  const _n_Q = _union(s.Q, _ins([], ((w_j_7: V) => w_j_7)(_ixfirst_retryable(s))));
   const _p_entered: V[] = [];
   _p_entered.push([0, "QUEUED", _add(s.entered.get("QUEUED"), 1)]);
   s.st = _run(s.st.clone(), _p_st);
@@ -958,18 +958,18 @@ function _out1(s: V, out: Action[]): boolean {
 
 function _out2(s: V, out: Action[]): boolean {
   // c_start
-  if (!((!_eq(s.Q, []) && (_has(s.Q, _least(s.Q)) && (s.slots > 0))))) return false;
-  out.push({ type: "start", job: _least(s.Q) });
+  if (!((!_eq(s.Q, []) && ((w_j_9: V) => (_has(s.Q, w_j_9) && (s.slots > 0)))(_least(s.Q))))) return false;
+  out.push({ type: "start", job: ((w_j_8: V) => w_j_8)(_least(s.Q)) });
   const _p_st: V[] = [];
-  _p_st.push([0, _least(s.Q), "RUNNING"]);
+  _p_st.push([0, ((w_j_10: V) => w_j_10)(_least(s.Q)), "RUNNING"]);
   const _p_tries: V[] = [];
-  _p_tries.push([0, _least(s.Q), _add(s.tries.get(_least(s.Q)), 1)]);
-  const _n_Q = _diff(s.Q, _ins([], _least(s.Q)));
+  _p_tries.push([0, ((w_j_11: V) => w_j_11)(_least(s.Q)), ((w_j_12: V) => _add(s.tries.get(w_j_12), 1))(_least(s.Q))]);
+  const _n_Q = _diff(s.Q, _ins([], ((w_j_13: V) => w_j_13)(_least(s.Q))));
   const _n_slots = _int2nat(_sub(s.slots, 1));
   const _p_entered: V[] = [];
   _p_entered.push([0, "RUNNING", _add(s.entered.get("RUNNING"), 1)]);
   const _p_byTries: V[] = [];
-  _p_byTries.push([0, _add(s.tries.get(_least(s.Q)), 1), _add(s.byTries.get(_add(s.tries.get(_least(s.Q)), 1)), 1)]);
+  _p_byTries.push([0, ((w_j_14: V) => _add(s.tries.get(w_j_14), 1))(_least(s.Q)), ((w_j_15: V) => _add(s.byTries.get(_add(s.tries.get(w_j_15), 1)), 1))(_least(s.Q))]);
   s.st = _run(s.st.clone(), _p_st);
   s.tries = _run(s.tries.clone(), _p_tries);
   s.entered = _run(s.entered.clone(), _p_entered);

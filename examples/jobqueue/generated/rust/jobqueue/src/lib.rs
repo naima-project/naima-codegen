@@ -1438,14 +1438,14 @@ fn fire_s2(s: &mut S, env: (Job, )) -> Result<(), StepError> {
 
 // c_give_up
 fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_spent(s)? && ((((&s.st)).get(&ixfirst_spent(s)?) == JSt::FAILED) && m_spent(((&s.tries)).get(&ixfirst_spent(s)?))?))) {
+    if !((ixsome_spent(s)? && { let w_1 = ixfirst_spent(s)?; ((((&s.st)).get(&w_1.clone()) == JSt::FAILED) && m_spent(((&s.tries)).get(&w_1.clone()))?) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(1, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::GiveUp(ixfirst_spent(s)?);
+    let act = Action::GiveUp({ let w_2 = ixfirst_spent(s)?; w_2.clone() });
     let mut o_st = Ov::over(&s.st);
-    o_st.set(ixfirst_spent(s)?, JSt::GAVEUP);
+    o_st.set({ let w_3 = ixfirst_spent(s)?; w_3.clone() }, JSt::GAVEUP);
     let w_st = o_st.writes();
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::GAVEUP, rt::add(((&s.entered)).get(&JSt::GAVEUP), 1i128)?);
@@ -1463,19 +1463,19 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_retry
 fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_retryable(s)? && ((((&s.st)).get(&ixfirst_retryable(s)?) == JSt::FAILED) && (!m_spent(((&s.tries)).get(&ixfirst_retryable(s)?))?)))) {
+    if !((ixsome_retryable(s)? && { let w_4 = ixfirst_retryable(s)?; ((((&s.st)).get(&w_4.clone()) == JSt::FAILED) && (!m_spent(((&s.tries)).get(&w_4.clone()))?)) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(2, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Retry(ixfirst_retryable(s)?);
+    let act = Action::Retry({ let w_5 = ixfirst_retryable(s)?; w_5.clone() });
     let mut o_st = Ov::over(&s.st);
-    o_st.set(ixfirst_retryable(s)?, JSt::QUEUED);
+    o_st.set({ let w_6 = ixfirst_retryable(s)?; w_6.clone() }, JSt::QUEUED);
     let w_st = o_st.writes();
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::QUEUED, rt::add(((&s.entered)).get(&JSt::QUEUED), 1i128)?);
     let w_entered = o_entered.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), ixfirst_retryable(s)?);
+    let r_Q_0 = rt::insert(BTreeSet::new(), { let w_7 = ixfirst_retryable(s)?; w_7.clone() });
     for (k, v) in w_st {
         s.dirty_Job.push(k.0);
         s.st.set(k, v);
@@ -1495,26 +1495,26 @@ fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_start
 fn out2(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((!(s.Q).is_empty() && ((s.Q).contains(&rt::least(&s.Q)?) && (s.slots.clone() > 0i128)))) {
+    if !((!(s.Q).is_empty() && { let w_8 = rt::least(&s.Q)?; ((s.Q).contains(&w_8.clone()) && (s.slots.clone() > 0i128)) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(3, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Start(rt::least(&s.Q)?);
+    let act = Action::Start({ let w_9 = rt::least(&s.Q)?; w_9.clone() });
     let mut o_st = Ov::over(&s.st);
-    o_st.set(rt::least(&s.Q)?, JSt::RUNNING);
+    o_st.set({ let w_10 = rt::least(&s.Q)?; w_10.clone() }, JSt::RUNNING);
     let w_st = o_st.writes();
     let mut o_tries = Ov::over(&s.tries);
-    o_tries.set(rt::least(&s.Q)?, rt::add(((&s.tries)).get(&rt::least(&s.Q)?), 1i128)?);
+    o_tries.set({ let w_11 = rt::least(&s.Q)?; w_11.clone() }, { let w_12 = rt::least(&s.Q)?; rt::add(((&s.tries)).get(&w_12.clone()), 1i128)? });
     let w_tries = o_tries.writes();
     let n_slots = rt::int2nat(rt::sub(s.slots.clone(), 1i128)?)?;
     let mut o_entered = Ov::over(&s.entered);
     o_entered.set(JSt::RUNNING, rt::add(((&s.entered)).get(&JSt::RUNNING), 1i128)?);
     let w_entered = o_entered.writes();
     let mut o_byTries = Ov::over(&s.byTries);
-    o_byTries.set(rt::add(((&s.tries)).get(&rt::least(&s.Q)?), 1i128)?, rt::add(((&s.byTries)).get(&rt::add(((&s.tries)).get(&rt::least(&s.Q)?), 1i128)?), 1i128)?);
+    o_byTries.set({ let w_13 = rt::least(&s.Q)?; rt::add(((&s.tries)).get(&w_13.clone()), 1i128)? }, { let w_14 = rt::least(&s.Q)?; rt::add(((&s.byTries)).get(&rt::add(((&s.tries)).get(&w_14.clone()), 1i128)?), 1i128)? });
     let w_byTries = o_byTries.writes();
-    let r_Q_0 = rt::insert(BTreeSet::new(), rt::least(&s.Q)?);
+    let r_Q_0 = rt::insert(BTreeSet::new(), { let w_15 = rt::least(&s.Q)?; w_15.clone() });
     for (k, v) in w_st {
         s.dirty_Job.push(k.0);
         s.st.set(k, v);
