@@ -382,5 +382,67 @@ class AdjConformance(unittest.TestCase):
         self.assertEqual(r.stdout.splitlines(), self.want)
 
 
+
+class PagedColumns(unittest.TestCase):
+    """docs/spec.md §3.11.5: a function's id entries, and a growing list's per-id slots, are
+    kept in pages of PAGE ids, and a page whose ids are all back to the default is freed.
+    An id's number is never reused (the model's meaning: a dropped instance's columns go
+    back to their defaults, its number stays spent); the storage is. Here 100,000 ids are
+    made and each dropped 100 later, as a flat loop's instances are: at most two pages are
+    held at once, none at the end, and every value read is the model's. A dense vector
+    held all 100,000 (VoxLogicA-2, 2026-11-11: about 1 KB of columns per loop element)."""
+
+    MAIN = """use generated_under_test::*;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct K(usize);
+
+impl FunKey for K {
+    fn dense(&self) -> Option<usize> {
+        Some(self.0)
+    }
+    fn undense(i: usize) -> Option<Self> {
+        Some(K(i))
+    }
+}
+
+#[allow(clippy::all)]
+fn main() {
+    let mut f: Fun<K, i128> = Fun::new(0);
+    let mut a: Adj<i128> = Adj::new(vec![]);
+    let (mut most_f, mut most_a, mut wrong) = (0, 0, 0);
+    for i in 0..100_000usize {
+        f.set(K(i), 7);
+        let _ = a.push(i as u32, 7);
+        if i >= 100 {
+            f.set(K(i - 100), 0);
+            let _ = a.set((i - 100) as u32, vec![]);
+            if f.get(&K(i - 100)) != 0 || a.len((i - 100) as u32) != 0 || f.get(&K(i - 99)) != 7 || a.len((i - 99) as u32) != 1 {
+                wrong += 1;
+            }
+        }
+        most_f = most_f.max(f.pages());
+        most_a = most_a.max(a.pages());
+    }
+    for i in 99_900..100_000usize {
+        f.set(K(i), 0);
+        let _ = a.set(i as u32, vec![]);
+    }
+    println!("most {} {} end {} {} wrong {} entries {}", most_f, most_a, f.pages(), a.pages(), wrong, f.entries().len());
+}
+"""
+
+    def test_dropped_ids_free_their_pages(self):
+        from test_codegen_python import _mini
+
+        d = Path(tempfile.mkdtemp(prefix="naima-codegen-rs-"))
+        try:
+            r = _cargo(d, rustback.emit(_mini())["src/lib.rs"], self.MAIN, "paged")
+            self.assertEqual(r.returncode, 0, r.stderr[-4000:])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertEqual(r.stdout.strip(), "most 2 2 end 0 0 wrong 0 entries 0")
+
+
 if __name__ == "__main__":
     unittest.main()
