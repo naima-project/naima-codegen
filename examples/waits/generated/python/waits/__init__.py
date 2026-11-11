@@ -855,20 +855,20 @@ def _fire_s3(s, env):
 
 def _out0(s, out):
     # c_tell
-    if not ((_ixsome_telling(s) and ((s.st.get(_ixfirst_telling(s)) == 4) and (s.waiters.get(_ixfirst_telling(s)) != ())))):
+    if not ((_ixsome_telling(s) and (lambda w_x_1: ((s.st.get(w_x_1) == 4) and (s.waiters.get(w_x_1) != ())))(_ixfirst_telling(s)))):
         return False
-    out.append((2, _head(s.waiters.get(_ixfirst_telling(s))), _ixfirst_telling(s),))
+    out.append((2, (lambda w_x_2: _head(s.waiters.get(w_x_2)))(_ixfirst_telling(s)), (lambda w_x_3: w_x_3)(_ixfirst_telling(s)),))
     _p_st = []
-    if (s.missing.get(_head(s.waiters.get(_ixfirst_telling(s)))) == 1):
+    if (lambda w_x_4: (s.missing.get(_head(s.waiters.get(w_x_4))) == 1))(_ixfirst_telling(s)):
         pass
-        _p_st.append((0, _head(s.waiters.get(_ixfirst_telling(s))), 1))
+        _p_st.append((0, (lambda w_x_5: _head(s.waiters.get(w_x_5)))(_ixfirst_telling(s)), 1))
     else:
         pass
     _p_waiters = []
-    _p_waiters.append((0, _ixfirst_telling(s), _tail(s.waiters.get(_ixfirst_telling(s)))))
+    _p_waiters.append((0, (lambda w_x_6: w_x_6)(_ixfirst_telling(s)), (lambda w_x_7: _tail(s.waiters.get(w_x_7)))(_ixfirst_telling(s))))
     _p_missing = []
-    _p_missing.append((0, _head(s.waiters.get(_ixfirst_telling(s))), _int2nat((s.missing.get(_head(s.waiters.get(_ixfirst_telling(s)))) - 1))))
-    _n_depth = max(s.depth, len(((_head(s.waiters.get(_ixfirst_telling(s))),) + _tail(s.waiters.get(_ixfirst_telling(s))))))
+    _p_missing.append((0, (lambda w_x_8: _head(s.waiters.get(w_x_8)))(_ixfirst_telling(s)), (lambda w_x_9: _int2nat((s.missing.get(_head(s.waiters.get(w_x_9))) - 1)))(_ixfirst_telling(s))))
+    _n_depth = (lambda w_x_10: max(s.depth, len(((_head(s.waiters.get(w_x_10)),) + _tail(s.waiters.get(w_x_10))))))(_ixfirst_telling(s))
     _run(s.st, _p_st)
     _run(s.waiters, _p_waiters)
     _run(s.missing, _p_missing)
@@ -878,17 +878,17 @@ def _out0(s, out):
 
 def _out1(s, out):
     # c_drop
-    if not ((_ixsome_droppable(s) and ((s.st.get(_ixfirst_droppable(s)) == 4) and (s.waiters.get(_ixfirst_droppable(s)) == ())))):
+    if not ((_ixsome_droppable(s) and (lambda w_x_11: ((s.st.get(w_x_11) == 4) and (s.waiters.get(w_x_11) == ())))(_ixfirst_droppable(s)))):
         return False
-    out.append((0, _ixfirst_droppable(s),))
+    out.append((0, (lambda w_x_12: w_x_12)(_ixfirst_droppable(s)),))
     _p_label = []
-    _p_label.append((0, _ixfirst_droppable(s), 0))
+    _p_label.append((0, (lambda w_x_13: w_x_13)(_ixfirst_droppable(s)), 0))
     _p_st = []
-    _p_st.append((0, _ixfirst_droppable(s), 0))
+    _p_st.append((0, (lambda w_x_14: w_x_14)(_ixfirst_droppable(s)), 0))
     _p_rank = []
-    _p_rank.append((0, _ixfirst_droppable(s), ()))
+    _p_rank.append((0, (lambda w_x_15: w_x_15)(_ixfirst_droppable(s)), ()))
     _p_made = []
-    _p_made.append((0, _m_keyof(s.label.get(_ixfirst_droppable(s))), 0))
+    _p_made.append((0, (lambda w_x_16: _m_keyof(s.label.get(w_x_16)))(_ixfirst_droppable(s)), 0))
     _run(s.label, _p_label)
     _run(s.st, _p_st)
     _run(s.rank, _p_rank)
@@ -898,11 +898,11 @@ def _out1(s, out):
 
 def _out2(s, out):
     # c_start
-    if not ((_ixsome_queue(s) and (s.st.get(_ixfirst_queue(s)) == 1))):
+    if not ((_ixsome_queue(s) and (lambda w_x_17: (s.st.get(w_x_17) == 1))(_ixfirst_queue(s)))):
         return False
-    out.append((1, _ixfirst_queue(s),))
+    out.append((1, (lambda w_x_18: w_x_18)(_ixfirst_queue(s)),))
     _p_st = []
-    _p_st.append((0, _ixfirst_queue(s), 2))
+    _p_st.append((0, (lambda w_x_19: w_x_19)(_ixfirst_queue(s)), 2))
     _run(s.st, _p_st)
     return True
 

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### A selected variable is bound once per expression
+
+The refined Core used to copy a selector's term (`first(...)`, `if(some(a), first(a), ...)`) at every occurrence of
+its variable in the summand's condition, action and assignments, and into the enabledness maps built from them: a
+selector of several cases used often made the refined, probe and stepper code grow with the product of the two.
+VoxLogicA-2's frame model wrote one four-case admission choice 971 times into its refined Core; compiling the rewriter
+of a 415-state probe system took 229 s instead of 133 s. Each expression that reads a selected variable is now
+bound once with `whr` (docs/spec.md §3.7.2), in mCRL2 and in the Rust, Python and TypeScript steppers (a `let`), and a
+selector is still evaluated only after its `when` holds. The behaviour of the generated code is unchanged.
+
+Regenerate a project (`naima-codegen generate`) to pick this up; `generate --check` refuses a generated directory written
+by the earlier generator.
+
 ### TypeScript a strict project and Node import as it is
 
 The generated TypeScript declared some classes with parameter properties (`constructor(readonly b: V)`), which are not

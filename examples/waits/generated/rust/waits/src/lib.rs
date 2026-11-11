@@ -1587,24 +1587,24 @@ fn fire_s3(s: &mut S, env: (Task, Task, )) -> Result<(), StepError> {
 
 // c_tell
 fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_telling(s)? && ((((&s.st)).get(&ixfirst_telling(s)?) == Phase::Done) && !s.waiters.is_empty((ixfirst_telling(s)?).0)))) {
+    if !((ixsome_telling(s)? && { let w_2 = ixfirst_telling(s)?; ((((&s.st)).get(&w_2.clone()) == Phase::Done) && !s.waiters.is_empty((w_2.clone()).0)) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(1, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Tell(s.waiters.head((ixfirst_telling(s)?).0)?, ixfirst_telling(s)?);
+    let act = Action::Tell({ let w_3 = ixfirst_telling(s)?; s.waiters.head((w_3.clone()).0)? }, { let w_4 = ixfirst_telling(s)?; w_4.clone() });
     let mut o_st = Ov::over(&s.st);
-    if (((&s.missing)).get(&s.waiters.head((ixfirst_telling(s)?).0)?) == 1i128) {
-        o_st.set(s.waiters.head((ixfirst_telling(s)?).0)?, Phase::Queued);
+    if { let w_5 = ixfirst_telling(s)?; (((&s.missing)).get(&s.waiters.head((w_5.clone()).0)?) == 1i128) } {
+        o_st.set({ let w_6 = ixfirst_telling(s)?; s.waiters.head((w_6.clone()).0)? }, Phase::Queued);
     } else {
     }
     let w_st = o_st.writes();
     let mut a_waiters: Vec<AdjOp<Task>> = Vec::new();
-    a_waiters.push(AdjOp::Pop((ixfirst_telling(s)?).0));
+    a_waiters.push(AdjOp::Set(({ let w_7 = ixfirst_telling(s)?; w_7.clone() }).0, { let w_8 = ixfirst_telling(s)?; rt::tail(s.waiters.to_vec((w_8.clone()).0))? }));
     let mut o_missing = Ov::over(&s.missing);
-    o_missing.set(s.waiters.head((ixfirst_telling(s)?).0)?, rt::int2nat(rt::sub(((&s.missing)).get(&s.waiters.head((ixfirst_telling(s)?).0)?), 1i128)?)?);
+    o_missing.set({ let w_9 = ixfirst_telling(s)?; s.waiters.head((w_9.clone()).0)? }, { let w_10 = ixfirst_telling(s)?; rt::int2nat(rt::sub(((&s.missing)).get(&s.waiters.head((w_10.clone()).0)?), 1i128)?)? });
     let w_missing = o_missing.writes();
-    let n_depth = (s.depth.clone()).max(rt::count((rt::cons(s.waiters.head((ixfirst_telling(s)?).0)?, rt::tail(s.waiters.to_vec((ixfirst_telling(s)?).0))?)).len())?);
+    let n_depth = { let w_11 = ixfirst_telling(s)?; (s.depth.clone()).max(rt::count((rt::cons(s.waiters.head((w_11.clone()).0)?, rt::tail(s.waiters.to_vec((w_11.clone()).0))?)).len())?) };
     for op in a_waiters {
         s.dirty_Task.push(op.id());
         s.waiters.apply(op)?;
@@ -1623,23 +1623,23 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_drop
 fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_droppable(s)? && ((((&s.st)).get(&ixfirst_droppable(s)?) == Phase::Done) && s.waiters.is_empty((ixfirst_droppable(s)?).0)))) {
+    if !((ixsome_droppable(s)? && { let w_12 = ixfirst_droppable(s)?; ((((&s.st)).get(&w_12.clone()) == Phase::Done) && s.waiters.is_empty((w_12.clone()).0)) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(2, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Drop(ixfirst_droppable(s)?);
+    let act = Action::Drop({ let w_13 = ixfirst_droppable(s)?; w_13.clone() });
     let mut o_label = Ov::over(&s.label);
-    o_label.set(ixfirst_droppable(s)?, 0i128);
+    o_label.set({ let w_14 = ixfirst_droppable(s)?; w_14.clone() }, 0i128);
     let w_label = o_label.writes();
     let mut o_st = Ov::over(&s.st);
-    o_st.set(ixfirst_droppable(s)?, Phase::Free);
+    o_st.set({ let w_15 = ixfirst_droppable(s)?; w_15.clone() }, Phase::Free);
     let w_st = o_st.writes();
     let mut o_rank = Ov::over(&s.rank);
-    o_rank.set(ixfirst_droppable(s)?, Vec::new());
+    o_rank.set({ let w_16 = ixfirst_droppable(s)?; w_16.clone() }, Vec::new());
     let w_rank = o_rank.writes();
     let mut o_made = Ov::over(&s.made);
-    o_made.set(m_keyof(((&s.label)).get(&ixfirst_droppable(s)?))?, 0i128);
+    o_made.set({ let w_17 = ixfirst_droppable(s)?; m_keyof(((&s.label)).get(&w_17.clone()))? }, 0i128);
     let w_made = o_made.writes();
     for (k, v) in w_label {
         s.label.set(k, rt::fit(v, 0, 4294967295, "label")?);
@@ -1661,14 +1661,14 @@ fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_start
 fn out2(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_queue(s)? && (((&s.st)).get(&ixfirst_queue(s)?) == Phase::Queued))) {
+    if !((ixsome_queue(s)? && { let w_18 = ixfirst_queue(s)?; (((&s.st)).get(&w_18.clone()) == Phase::Queued) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(3, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Start(ixfirst_queue(s)?);
+    let act = Action::Start({ let w_19 = ixfirst_queue(s)?; w_19.clone() });
     let mut o_st = Ov::over(&s.st);
-    o_st.set(ixfirst_queue(s)?, Phase::Running);
+    o_st.set({ let w_20 = ixfirst_queue(s)?; w_20.clone() }, Phase::Running);
     let w_st = o_st.writes();
     for (k, v) in w_st {
         s.dirty_Task.push(k.0);
@@ -1751,8 +1751,8 @@ fn state_bytes(s: &S, out: &mut Vec<u8>) {
     {
         let f = &s.rank;
         codec::len((f.default_value()).len(), out);
-        for x2 in (f.default_value()).iter() {
-            codec::nat(*(x2), out);
+        for x21 in (f.default_value()).iter() {
+            codec::nat(*(x21), out);
         }
         let e = f.entries();
         codec::len(e.len(), out);
@@ -1760,16 +1760,16 @@ fn state_bytes(s: &S, out: &mut Vec<u8>) {
             let k = &k;
             codec::nat(i128::from((k).0), out);
             codec::len((v).len(), out);
-            for x3 in (v).iter() {
-                codec::nat(*(x3), out);
+            for x22 in (v).iter() {
+                codec::nat(*(x22), out);
             }
         }
     }
     {
         let f = &s.waiters;
         codec::len((&f.d).len(), out);
-        for x4 in (&f.d).iter() {
-            codec::nat(i128::from((x4).0), out);
+        for x23 in (&f.d).iter() {
+            codec::nat(i128::from((x23).0), out);
         }
         let ents = f.entries();
         codec::len(ents.len(), out);
@@ -1777,8 +1777,8 @@ fn state_bytes(s: &S, out: &mut Vec<u8>) {
             let k = &Task(*k);
             codec::nat(i128::from((k).0), out);
             codec::len((v).len(), out);
-            for x5 in (v).iter() {
-                codec::nat(i128::from((x5).0), out);
+            for x24 in (v).iter() {
+                codec::nat(i128::from((x24).0), out);
             }
         }
     }

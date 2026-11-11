@@ -696,12 +696,23 @@ Let the output summands be numbered `1 … m` in policy order. For output summan
 with sum variables `x̄`, condition `c_j`, selectors `t̄` with conditions `w̄`, and
 equality-fixed variables `ȳ := ū`:
 
-1. `σ_j` is the substitution `x̄ := t̄, ȳ := ū`, applied in the order of the
-   selector table and then of the equalities; `c'_j = w_j && c_j[σ_j]`, where
+1. `σ_j` is the substitution `ȳ := ū` of the equality-fixed variables; the
+   selected variables `x̄` are bound, not substituted: every expression `e` of the
+   summand that reads some `x_k` (its condition, each action argument, each
+   right side) becomes `e whr x_k = t_k end`, one `whr` per selected variable it
+   needs (those it reads and those their selectors read, the first selected
+   outermost), so that a selector is written, and evaluated, once per expression
+   and not once per occurrence. `c'_j = w_j && c_j[σ_j]` with its bindings, where
    `w_j` is the conjunction of the selectors' `when` terms (`true` when there are
-   none). The refined summand has no sum variable; its action arguments and
-   next-state assignments are those of `j` under `σ_j`, plus the upkeep of the
-   entry-order indexes (§3.7.4).
+   none), each bound only by the selectors before its own. The right side of a
+   function or set parameter keeps its shape (`p[i -> v]`, `p + {x}`, `p - {x}`
+   under `if`): its indices, values, elements and conditions are bound one by
+   one. The refined summand has no sum variable; its action arguments and
+   next-state assignments are those of `j` under `σ_j` with their bindings, plus
+   the upkeep of the entry-order indexes (§3.7.4). (A selector of several cases
+   used in several summands, copied at every occurrence, made a refined Core
+   grow with the product of the two: 971 copies of one choice in VoxLogicA-2's
+   frame model.)
 2. The refined condition of output summand `j` is
    `c'_j && !c'_1 && ... && !c'_(j-1)`: it fires only when no output before it in the
    policy is enabled.
