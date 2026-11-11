@@ -1433,9 +1433,17 @@ native driver instead (§3.16.5).
 #### 3.11.5 Stored functions
 
 A function-sorted parameter is a `Fun<K, V>`: its default and the entries that differ
-from it. The entries at a key of an id sort (§3.3.3) are held in a vector indexed by the
-id, those at any other key in a map ordered by key; the trait `FunKey` says which (an id
-type's `dense` is its index). An id's entry then costs the size of `V` (a map's entry
+from it. The entries at a key of an id sort (§3.3.3) are held in pages of `PAGE` (256)
+consecutive ids, each page a vector indexed by the id and a count of its entries that
+differ from the default; a page whose entries are all the default again is freed. Those
+at any other key are in a map ordered by key; the trait `FunKey` says which (an id
+type's `dense` is its index). An id's number is never reused, but its storage is: a
+model that sets a dropped instance's columns back to their defaults keeps pages for the
+ids around its live instances only, where a vector grown to the largest id kept one
+entry per instance ever made (VoxLogicA-2's frame model, 2026-11-11: about 1 KB of
+columns per loop element, 10^5 elements). A per-id growing list (`Adj`, §3.10.3) keeps
+its per-id slots in pages the same way; an id whose list is the default again has none.
+An id's entry then costs the size of `V` (a map's entry
 costs the key, the value and the map's own nodes, several times that), and reading or
 writing it is an index, not a search: the columns of a model whose ids number in the
 millions (VoxLogicA's deciding part: 78 columns over nodes, 1.49 KB a node as maps)

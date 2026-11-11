@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A dropped instance's columns free their storage
+
+The generated Rust kept a function's entries at id keys in a vector grown to the largest id ever written, and a growing
+list's per-id slots likewise, so a long run held about a kilobyte of columns per instance it ever made, live or not
+(VoxLogicA-2's frame model on a flat loop). Both now keep their id entries in pages of 256 ids, each freed once all its
+entries are back to the default (docs/spec.md §3.11.5): ids are still never reused, their storage is. Reading and
+writing an id entry stays an index; values read are unchanged.
+
 ### A selected variable is bound once per expression
 
 The refined Core used to copy a selector's term (`first(...)`, `if(some(a), first(a), ...)`) at every occurrence of
