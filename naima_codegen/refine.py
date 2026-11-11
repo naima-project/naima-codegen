@@ -544,9 +544,10 @@ def _bind_once(r: Src, params: dict) -> None:
 
 def _update_leaves(rhs: str, p: str, is_set: bool) -> list:
     """The spans (start, end) of rhs that are read, not built on, in a right side
-    built from p by updates `p[i -> v]` (a column) or `p + {x}`, `p - {x}` (a set)
-    under `if` (as `_written_ids` reads it): each index, value, element and `if`
-    condition, and whatever is not of that shape, whole."""
+    built from p by updates `p[i -> v]` (a column), `p + {x}`, `p - {x}` (a set),
+    or a map applied to it (`release(p, xs)`), under `if`: each index, value,
+    element, `if` condition and argument that does not mention p, and whatever is
+    not of that shape, whole."""
     leaves, stack = [], [(0, len(rhs))]
     while stack:
         a, b = stack.pop()
@@ -610,6 +611,15 @@ def _update_leaves(rhs: str, p: str, is_set: bool) -> list:
             else:
                 leaves.append((a, b))
             continue
+        m = re.match(r"[A-Za-z_][\w']*\s*\(", e)
+        if m and matching(e, m.end() - 1) == len(e):
+            parts = split_top(e[m.end():-1], ",")
+            if any(p in idents(x) for x in parts):
+                o = a + m.end()
+                for x in parts:
+                    (stack if p in idents(x) else leaves).append((o, o + len(x)))
+                    o += len(x) + 1
+                continue
         leaves.append((a, b))
     return leaves
 
