@@ -382,5 +382,28 @@ class AdjConformance(unittest.TestCase):
         self.assertEqual(r.stdout.splitlines(), self.want)
 
 
+class TypeScriptOnlyProject(unittest.TestCase):
+    """A project whose [project] table lists only the typescript backend, as every UI model of
+    Naima does, generates: the cost check reads Rust step code emitted for it alone, and no Rust
+    or Python file is written."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not _pinned():
+            raise unittest.SkipTest("the pinned mCRL2 toolset %s is not installed" % PIN)
+
+    def test_generate_writes_typescript_only(self):
+        from naima_codegen import outputs
+        from naima_codegen.project import load
+        root = _forms_root()
+        toml = root / "codegen.toml"
+        toml.write_text(toml.read_text().replace(
+            'backends = ["rust", "python", "typescript"]\nrust_crate = "forms"\npython_package = "forms"\n',
+            'backends = ["typescript"]\n'))
+        files = outputs.build(load(root), run(root), Toolchain().version())
+        names = sorted(k for k in files if k != "MANIFEST.json")
+        self.assertTrue(names and all(k.startswith("typescript/forms/") for k in names), names)
+
+
 if __name__ == "__main__":
     unittest.main()

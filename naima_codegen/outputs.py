@@ -121,7 +121,9 @@ def _whole_operations(proj, model, rust: str) -> dict:
     costs = rustback.whole_operations(rust, frontier)
     found = {"%s: %s" % (k, x) for k, v in costs.items() for x in v}
     known = set(model.config.cost_known)
-    lib = "%s/rust/%s/src/lib.rs" % (proj.generated, proj.cfg.project["rust_crate"])
+    crate = proj.cfg.project["rust_crate"]
+    lib = ("%s/rust/%s/src/lib.rs" % (proj.generated, crate) if crate
+           else "the Rust step code emitted for the cost check (Rust is not a chosen backend)")
     probs = [Diagnostic("G8", lib, x, "§3.13.1",
                         "a whole frontier set or list copied or scanned at every firing; "
                         "change the model or the generator, or list it in cost_known of %s" % proj.toml)
