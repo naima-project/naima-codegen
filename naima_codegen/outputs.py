@@ -133,15 +133,12 @@ def _whole_operations(proj, model, rust: str) -> dict:
     return costs
 
 
-def _refinement(proj, model, tools):
-    """The refined Core, its stepper, and the files of generated/model (§3.7.4, §3.9.7)."""
-    from . import stepper, systems
+def refined(proj, model):
+    """The refined Core of the model (§3.7.4), once its policy is checked (G9)."""
     from .errors import Diagnostic, GeneratorError
     from .policy import check_policy, read_policy
     from .refine import fixed_vars, read_core_text, refine
-    from .toolchain import Toolchain
 
-    tools = tools or Toolchain()
     core = proj.path(proj.m("core.mcrl2")).read_text(encoding="utf-8")
     pol, problems = read_policy(proj.path(proj.m("policy.toml")).read_text(encoding="utf-8"))
     diags = [Diagnostic("G9", "model/policy.toml", w, sec, msg) for w, sec, msg in problems]
@@ -158,7 +155,18 @@ def _refinement(proj, model, tools):
     diags += check_policy(pol, outs, params, columns, sets, ct.ids, names)
     if diags:
         raise GeneratorError(diags)
-    ref = refine(core, pol, model.summand_kind)
+    return refine(core, pol, model.summand_kind)
+
+
+def _refinement(proj, model, tools):
+    """The refined Core, its stepper, and the files of generated/model (§3.7.4, §3.9.7)."""
+    from . import stepper, systems
+    from .errors import Diagnostic, GeneratorError
+    from .toolchain import Toolchain
+
+    tools = tools or Toolchain()
+    core = proj.path(proj.m("core.mcrl2")).read_text(encoding="utf-8")
+    ref = refined(proj, model)
     st = stepper.build(model, ref, core, proj.path(proj.m("codegen-init.mcrl2")).read_text(encoding="utf-8"), tools)
     files = {"model/core-refined.mcrl2": ref.refined, "model/core-probe.mcrl2": ref.probe, "model/probe.mcf": ref.probe_mcf}
     env = proj.path(proj.m("env.mcrl2")).read_text(encoding="utf-8")

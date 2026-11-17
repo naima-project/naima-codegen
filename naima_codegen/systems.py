@@ -75,6 +75,18 @@ def finite_ids(core: str, bounds: list) -> tuple[str, list]:
     return core, ctors
 
 
+def with_observers(core: str, observers: str, quiescent: str) -> tuple[str, list]:
+    """The Core with the observers of an observers.mcrl2 inserted at its
+    `%@observers` marker, QUIESCENT read as quiescent; and the observers' labels."""
+    acts, summands = observers.split("% @summands", 1)
+    summands = summands.partition("% @witness")[0]  # witnesses: model/systems/<name>-wit only
+    acts = acts.split("% @act", 1)[1]
+    labels = sorted(set(re.findall(r"\b(o_[A-Za-z0-9_]+)\b", acts)))
+    core = core.replace("proc Core(", acts.strip() + "\n\nproc Core(", 1)
+    core = core.replace("%@observers", summands.rstrip().replace("QUIESCENT", quiescent), 1)
+    return core, labels
+
+
 def assemble(core: str, env: str, instances: list, ids: IdBounds, *, init_suffix: str = "", observers: str | None = None,
              quiescent: str = "true", comm: list = (), allow: list = ()) -> str:
     """One system: instances is [(name, text)]; comm is [(core label, environment label, result)]."""
@@ -82,12 +94,7 @@ def assemble(core: str, env: str, instances: list, ids: IdBounds, *, init_suffix
     core, ctors = finite_ids(core, ids.bounds(texts))
     obs_labels = []
     if observers is not None:
-        acts, summands = observers.split("% @summands", 1)
-        summands = summands.partition("% @witness")[0]  # witnesses: model/systems/<name>-wit only
-        acts = acts.split("% @act", 1)[1]
-        obs_labels = sorted(set(re.findall(r"\b(o_[A-Za-z0-9_]+)\b", acts)))
-        core = core.replace("proc Core(", acts.strip() + "\n\nproc Core(", 1)
-        core = core.replace("%@observers", summands.rstrip().replace("QUIESCENT", quiescent), 1)
+        core, obs_labels = with_observers(core, observers, quiescent)
     if init_suffix:
         k = env.index("proc CoreStart")
         c = env.index("Core(", k)

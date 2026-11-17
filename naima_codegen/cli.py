@@ -2,6 +2,7 @@
 
     naima-codegen generate [--check | --front-end] [--project DIR]
     naima-codegen check-refinement [--properties | --no-model] [--project DIR] [group...]
+    naima-codegen lean --out DIR [--namespace NAME] [--free P,...] [--project DIR]
 
 generate: linearise the model with the pinned toolset, refuse what is outside
 the accepted subset listing every refusal with its code, then write the code of
@@ -31,6 +32,12 @@ item under [project] properties whose model is <model>/systems/<group>.mcrl2,
 on the group's refined system. Prints one line per check; exit status 1 when
 any fails. Long on large models: run detached with a log.
 
+lean: the refined Core with its observers, linearised, as a Lean 4 transition
+system (leanback.py), written to DIR as Mcrl2.lean (mCRL2's library) and
+NAME.lean (default Model), with each property of the form [true* . a] false
+as a proposition prop_<name> to prove. The configuration parameters, and those
+named by --free, are left free in the initial state.
+
 The project is the directory DIR (default: the current directory); its
 codegen.toml says where the model and the outputs are (§3.6.9).
 """
@@ -44,7 +51,8 @@ from pathlib import Path
 from .errors import GeneratorError
 
 USAGE = """usage: naima-codegen generate [--check | --front-end] [--project DIR]
-       naima-codegen check-refinement [--properties | --no-model] [--project DIR] [group...]"""
+       naima-codegen check-refinement [--properties | --no-model] [--project DIR] [group...]
+       naima-codegen lean --out DIR [--namespace NAME] [--free P,...] [--project DIR]"""
 
 
 def _project_arg(argv: list) -> tuple[Path, list] | None:
@@ -136,14 +144,40 @@ def check_refinement(root: Path, argv: list) -> int:
     return 0 if ok else 1
 
 
+def lean(root: Path, argv: list) -> int:
+    from .leanback import build
+    from .project import load
+
+    opts = {}
+    while argv:
+        if argv[0] not in ("--out", "--namespace", "--free") or len(argv) < 2:
+            print(USAGE, file=sys.stderr)
+            return 2
+        opts[argv[0]] = argv[1]
+        argv = argv[2:]
+    if "--out" not in opts:
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        files = build(load(root), [x for x in opts.get("--free", "").split(",") if x], opts.get("--namespace", "Model"))
+    except GeneratorError as e:
+        return _refused("lean", e)
+    out = Path(opts["--out"])
+    out.mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (out / name).write_text(text, encoding="utf-8")
+    print("naima-codegen lean: wrote %s under %s/" % (", ".join(sorted(files)), out))
+    return 0
+
+
 def main(argv: list | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] in (["-h"], ["--help"]):
         print(__doc__.strip())
         return 0
     parsed = _project_arg(argv[1:]) if argv else None
-    if parsed is None or argv[0] not in ("generate", "check-refinement"):
+    if parsed is None or argv[0] not in ("generate", "check-refinement", "lean"):
         print(USAGE, file=sys.stderr)
         return 2
     root, rest = parsed
-    return generate(root, rest) if argv[0] == "generate" else check_refinement(root, rest)
+    return {"generate": generate, "check-refinement": check_refinement, "lean": lean}[argv[0]](root, rest)

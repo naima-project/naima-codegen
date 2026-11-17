@@ -1,0 +1,13 @@
+name = "lean-frames-spike"
+defaultTargets = ["CacheBound"]
+
+[[lean_lib]]
+name = "Mcrl2"
+srcDir = "gen"
+
+[[lean_lib]]
+name = "Frames"
+srcDir = "gen"
+
+[[lean_lib]]
+name = "CacheBound"
