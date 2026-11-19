@@ -141,19 +141,33 @@ pub trait FunKey: Ord + Clone {
 impl FunKey for i128 {}
 impl FunKey for bool {}
 
+/// The ids of a page of a function's or a growing list's id entries (docs/spec.md §3.11.5).
+pub const PAGE: usize = 256;
+
+/// A page of id entries: the values of PAGE consecutive ids and how many of them
+/// differ from the default. A page whose entries are all the default again is freed:
+/// an id's number is never reused (the model's meaning), but its storage is, once the
+/// ids around it are dropped back to the default (bugs of VoxLogicA-2, 2026-11-11: a
+/// dense vector grew with every instance ever made, about 350 B of columns per instance).
+#[derive(Debug, Clone)]
+struct Page<V> {
+    n: usize,
+    e: Vec<V>,
+}
+
 /// A stored function: a default and the entries that differ from it, those at an id
-/// key in a vector indexed by the id (the size of a value per id, docs/spec.md §3.11.5), the
-/// others in a map.
+/// key in pages of PAGE ids indexed by the id (the size of a value per id of a page
+/// with a live entry, docs/spec.md §3.11.5), the others in a map.
 #[derive(Debug, Clone)]
 pub struct Fun<K: Ord, V> {
     d: V,
     m: BTreeMap<K, V>,
-    v: Vec<V>,
+    p: Vec<Option<Box<Page<V>>>>,
 }
 
 impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     pub fn new(d: V) -> Self {
-        Fun { d, m: BTreeMap::new(), v: Vec::new() }
+        Fun { d, m: BTreeMap::new(), p: Vec::new() }
     }
     pub fn from_parts(d: V, kv: Vec<(K, V)>) -> Self {
         let mut f = Fun::new(d);
@@ -169,14 +183,38 @@ impl<K: FunKey, V: Clone + PartialEq> Fun<K, V> {
     /// The entries that differ from the default, in key order.
     pub fn entries(&self) -> Vec<(K, &V)> {
         let mut out: Vec<(K, &V)> = self.m.iter().map(|(k, v)| (k.clone(), v)).collect();
-        for (i, x) in self.v.iter().enumerate() {
-            if *x != self.d {
-                if let Some(k) = K::undense(i) {
-                    out.push((k, x));
+        for (q, page) in self.p.iter().enumerate() {
+            let Some(page) = page else { continue };
+            for (o, x) in page.e.iter().enumerate() {
+                if *x != self.d {
+                    if let Some(k) = K::undense(q.saturating_mul(PAGE).saturating_add(o)) {
+                        out.push((k, x));
+                    }
                 }
             }
         }
         out
+    }
+    /// The pages holding an entry that differs from the default (for the memory a run keeps).
+    pub fn pages(&self) -> usize {
+        self.p.iter().filter(|x| x.is_some()).count()
+    }
+    /// The page of id i, made with every entry the default when it has none.
+    fn page(&mut self, i: usize) -> Option<&mut Page<V>> {
+        let q = i / PAGE;
+        if self.p.len() <= q {
+            self.p.resize_with(q.saturating_add(1), || None);
+        }
+        let d = &self.d;
+        self.p.get_mut(q).map(|x| &mut **x.get_or_insert_with(|| Box::new(Page { n: 0, e: vec![d.clone(); PAGE] })))
+    }
+    /// Page q freed when no entry of it differs from the default.
+    fn free_if_default(&mut self, q: usize) {
+        if let Some(x) = self.p.get_mut(q) {
+            if x.as_ref().is_some_and(|page| page.n == 0) {
+                *x = None;
+            }
+        }
     }
 }
 
@@ -194,7 +232,10 @@ impl<K: FunKey, V: Clone + PartialEq> Get<K, V> for Fun<K, V> {
     }
     fn get_ref(&self, k: &K) -> &V {
         match k.dense() {
-            Some(i) => self.v.get(i).unwrap_or(&self.d),
+            Some(i) => match self.p.get(i / PAGE) {
+                Some(Some(page)) => page.e.get(i % PAGE).unwrap_or(&self.d),
+                _ => &self.d,
+            },
             None => self.m.get(k).unwrap_or(&self.d),
         }
     }
@@ -204,15 +245,24 @@ impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn set(&mut self, k: K, v: V) {
         match k.dense() {
             Some(i) => {
-                if i >= self.v.len() {
-                    if v == self.d {
-                        return;
+                let q = i / PAGE;
+                if !matches!(self.p.get(q), Some(Some(_))) && v == self.d {
+                    return;
+                }
+                let now = v != self.d;
+                let d = self.d.clone();
+                if let Some(page) = self.page(i) {
+                    if let Some(x) = page.e.get_mut(i % PAGE) {
+                        let was = *x != d;
+                        *x = v;
+                        match (was, now) {
+                            (false, true) => page.n = page.n.saturating_add(1),
+                            (true, false) => page.n = page.n.saturating_sub(1),
+                            _ => {}
+                        }
                     }
-                    self.v.resize(i.saturating_add(1), self.d.clone());
                 }
-                if let Some(x) = self.v.get_mut(i) {
-                    *x = v;
-                }
+                self.free_if_default(q);
             }
             None => {
                 if v == self.d {
@@ -226,21 +276,45 @@ impl<K: FunKey, V: Clone + PartialEq> GetSet<K, V> for Fun<K, V> {
     fn as_get(&self) -> &dyn Get<K, V> {
         self
     }
+    /// The value at k to change in place: the change makes it differ from the default
+    /// (an insertion into a list), so it is counted as differing.
     fn slot(&mut self, k: K) -> &mut V {
         if let Some(i) = k.dense() {
-            if i >= self.v.len() {
-                self.v.resize(i.saturating_add(1), self.d.clone());
+            let (q, o) = (i / PAGE, i % PAGE);
+            if self.p.len() <= q {
+                self.p.resize_with(q.saturating_add(1), || None);
             }
-            if let Some(x) = self.v.get_mut(i) {
-                return x;
+            if let Some(slot) = self.p.get_mut(q) {
+                let d = &self.d;
+                let page = slot.get_or_insert_with(|| Box::new(Page { n: 0, e: vec![d.clone(); PAGE] }));
+                if page.e.get(o) == Some(d) {
+                    page.n = page.n.saturating_add(1);
+                }
+                if let Some(x) = page.e.get_mut(o) {
+                    return x;
+                }
             }
         }
         let d = &self.d;
         self.m.entry(k).or_insert_with(|| d.clone())
     }
     fn tidy(&mut self, k: &K) {
-        if k.dense().is_none() && self.m.get(k) == Some(&self.d) {
-            self.m.remove(k);
+        match k.dense() {
+            Some(i) => {
+                let q = i / PAGE;
+                let d = self.d.clone();
+                if let Some(Some(page)) = self.p.get_mut(q) {
+                    if page.e.get(i % PAGE) == Some(&d) {
+                        page.n = page.n.saturating_sub(1);
+                    }
+                }
+                self.free_if_default(q);
+            }
+            None => {
+                if self.m.get(k) == Some(&self.d) {
+                    self.m.remove(k);
+                }
+            }
         }
     }
 }
@@ -299,8 +373,9 @@ pub struct Adj<X> {
     val: Vec<X>,
     next: Vec<u32>,
     free: u32,
-    /// Per id (first cell, last cell, length), grown to the largest id written.
-    ids: Vec<Option<(u32, u32, u32)>>,
+    /// Per id (first cell, last cell, length), in pages of PAGE ids: an id whose list is
+    /// the default again has none, and a page with no id left is freed.
+    ids: Vec<Option<Box<Page<Option<(u32, u32, u32)>>>>>,
 }
 
 /// A write of a per-id growing list, applied after the summand's reads (§3.8.4).
@@ -332,7 +407,11 @@ impl<X: Clone + PartialEq> Adj<X> {
     }
 
     fn slot(&self, i: u32) -> Option<(u32, u32, u32)> {
-        self.ids.get(adj_at(i)).copied().flatten()
+        let k = adj_at(i);
+        match self.ids.get(k / PAGE) {
+            Some(Some(page)) => page.e.get(k % PAGE).copied().flatten(),
+            _ => None,
+        }
     }
 
     fn link(&self, c: u32) -> u32 {
@@ -370,13 +449,30 @@ impl<X: Clone + PartialEq> Adj<X> {
         }
     }
 
+    /// Id i's slot set to s, or cleared when s is an empty list and the default is empty.
     fn put(&mut self, i: u32, s: (u32, u32, u32)) {
         let k = adj_at(i);
-        if self.ids.len() <= k {
-            self.ids.resize(k.saturating_add(1), None);
+        let (q, o) = (k / PAGE, k % PAGE);
+        let now = if s.2 == 0 && self.d.is_empty() { None } else { Some(s) };
+        if now.is_none() && !matches!(self.ids.get(q), Some(Some(_))) {
+            return;
         }
-        if let Some(x) = self.ids.get_mut(k) {
-            *x = Some(s);
+        if self.ids.len() <= q {
+            self.ids.resize_with(q.saturating_add(1), || None);
+        }
+        if let Some(slot) = self.ids.get_mut(q) {
+            let page = slot.get_or_insert_with(|| Box::new(Page { n: 0, e: vec![None; PAGE] }));
+            if let Some(x) = page.e.get_mut(o) {
+                match (x.is_some(), now.is_some()) {
+                    (false, true) => page.n = page.n.saturating_add(1),
+                    (true, false) => page.n = page.n.saturating_sub(1),
+                    _ => {}
+                }
+                *x = now;
+            }
+            if page.n == 0 {
+                *slot = None;
+            }
         }
     }
 
@@ -465,9 +561,14 @@ impl<X: Clone + PartialEq> Adj<X> {
         }
     }
 
+    /// The pages of ids holding a list that differs from the default (for the memory a run keeps).
+    pub fn pages(&self) -> usize {
+        self.ids.iter().filter(|x| x.is_some()).count()
+    }
+
     /// The ids whose list differs from the default, ascending, with their lists.
     pub fn entries(&self) -> Vec<(u32, Vec<X>)> {
-        (0..self.ids.len())
+        (0..self.ids.len().saturating_mul(PAGE))
             .filter_map(|k| u32::try_from(k).ok())
             .map(|i| (i, self.to_vec(i)))
             .filter(|(i, l)| self.slot(*i).is_some() && *l != self.d)
@@ -1587,24 +1688,24 @@ fn fire_s3(s: &mut S, env: (Task, Task, )) -> Result<(), StepError> {
 
 // c_tell
 fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_telling(s)? && ((((&s.st)).get(&ixfirst_telling(s)?) == Phase::Done) && !s.waiters.is_empty((ixfirst_telling(s)?).0)))) {
+    if !((ixsome_telling(s)? && { let w_2 = ixfirst_telling(s)?; ((((&s.st)).get(&w_2.clone()) == Phase::Done) && !s.waiters.is_empty((w_2.clone()).0)) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(1, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Tell(s.waiters.head((ixfirst_telling(s)?).0)?, ixfirst_telling(s)?);
+    let act = Action::Tell({ let w_3 = ixfirst_telling(s)?; s.waiters.head((w_3.clone()).0)? }, { let w_4 = ixfirst_telling(s)?; w_4.clone() });
     let mut o_st = Ov::over(&s.st);
-    if (((&s.missing)).get(&s.waiters.head((ixfirst_telling(s)?).0)?) == 1i128) {
-        o_st.set(s.waiters.head((ixfirst_telling(s)?).0)?, Phase::Queued);
+    if { let w_5 = ixfirst_telling(s)?; (((&s.missing)).get(&s.waiters.head((w_5.clone()).0)?) == 1i128) } {
+        o_st.set({ let w_6 = ixfirst_telling(s)?; s.waiters.head((w_6.clone()).0)? }, Phase::Queued);
     } else {
     }
     let w_st = o_st.writes();
     let mut a_waiters: Vec<AdjOp<Task>> = Vec::new();
-    a_waiters.push(AdjOp::Pop((ixfirst_telling(s)?).0));
+    a_waiters.push(AdjOp::Set(({ let w_7 = ixfirst_telling(s)?; w_7.clone() }).0, { let w_8 = ixfirst_telling(s)?; rt::tail(s.waiters.to_vec((w_8.clone()).0))? }));
     let mut o_missing = Ov::over(&s.missing);
-    o_missing.set(s.waiters.head((ixfirst_telling(s)?).0)?, rt::int2nat(rt::sub(((&s.missing)).get(&s.waiters.head((ixfirst_telling(s)?).0)?), 1i128)?)?);
+    o_missing.set({ let w_9 = ixfirst_telling(s)?; s.waiters.head((w_9.clone()).0)? }, { let w_10 = ixfirst_telling(s)?; rt::int2nat(rt::sub(((&s.missing)).get(&s.waiters.head((w_10.clone()).0)?), 1i128)?)? });
     let w_missing = o_missing.writes();
-    let n_depth = (s.depth.clone()).max(rt::count((rt::cons(s.waiters.head((ixfirst_telling(s)?).0)?, rt::tail(s.waiters.to_vec((ixfirst_telling(s)?).0))?)).len())?);
+    let n_depth = { let w_11 = ixfirst_telling(s)?; (s.depth.clone()).max(rt::count((rt::cons(s.waiters.head((w_11.clone()).0)?, rt::tail(s.waiters.to_vec((w_11.clone()).0))?)).len())?) };
     for op in a_waiters {
         s.dirty_Task.push(op.id());
         s.waiters.apply(op)?;
@@ -1623,23 +1724,23 @@ fn out0(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_drop
 fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_droppable(s)? && ((((&s.st)).get(&ixfirst_droppable(s)?) == Phase::Done) && s.waiters.is_empty((ixfirst_droppable(s)?).0)))) {
+    if !((ixsome_droppable(s)? && { let w_12 = ixfirst_droppable(s)?; ((((&s.st)).get(&w_12.clone()) == Phase::Done) && s.waiters.is_empty((w_12.clone()).0)) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(2, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Drop(ixfirst_droppable(s)?);
+    let act = Action::Drop({ let w_13 = ixfirst_droppable(s)?; w_13.clone() });
     let mut o_label = Ov::over(&s.label);
-    o_label.set(ixfirst_droppable(s)?, 0i128);
+    o_label.set({ let w_14 = ixfirst_droppable(s)?; w_14.clone() }, 0i128);
     let w_label = o_label.writes();
     let mut o_st = Ov::over(&s.st);
-    o_st.set(ixfirst_droppable(s)?, Phase::Free);
+    o_st.set({ let w_15 = ixfirst_droppable(s)?; w_15.clone() }, Phase::Free);
     let w_st = o_st.writes();
     let mut o_rank = Ov::over(&s.rank);
-    o_rank.set(ixfirst_droppable(s)?, Vec::new());
+    o_rank.set({ let w_16 = ixfirst_droppable(s)?; w_16.clone() }, Vec::new());
     let w_rank = o_rank.writes();
     let mut o_made = Ov::over(&s.made);
-    o_made.set(m_keyof(((&s.label)).get(&ixfirst_droppable(s)?))?, 0i128);
+    o_made.set({ let w_17 = ixfirst_droppable(s)?; m_keyof(((&s.label)).get(&w_17.clone()))? }, 0i128);
     let w_made = o_made.writes();
     for (k, v) in w_label {
         s.label.set(k, rt::fit(v, 0, 4294967295, "label")?);
@@ -1661,14 +1762,14 @@ fn out1(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
 
 // c_start
 fn out2(s: &mut S, out: &mut Vec<Action>) -> Result<bool, StepError> {
-    if !((ixsome_queue(s)? && (((&s.st)).get(&ixfirst_queue(s)?) == Phase::Queued))) {
+    if !((ixsome_queue(s)? && { let w_18 = ixfirst_queue(s)?; (((&s.st)).get(&w_18.clone()) == Phase::Queued) })) {
         return Ok(false);
     }
     #[cfg(feature = "firing")]
     FIRING.store(3, core::sync::atomic::Ordering::Relaxed);
-    let act = Action::Start(ixfirst_queue(s)?);
+    let act = Action::Start({ let w_19 = ixfirst_queue(s)?; w_19.clone() });
     let mut o_st = Ov::over(&s.st);
-    o_st.set(ixfirst_queue(s)?, Phase::Running);
+    o_st.set({ let w_20 = ixfirst_queue(s)?; w_20.clone() }, Phase::Running);
     let w_st = o_st.writes();
     for (k, v) in w_st {
         s.dirty_Task.push(k.0);
@@ -1751,8 +1852,8 @@ fn state_bytes(s: &S, out: &mut Vec<u8>) {
     {
         let f = &s.rank;
         codec::len((f.default_value()).len(), out);
-        for x2 in (f.default_value()).iter() {
-            codec::nat(*(x2), out);
+        for x21 in (f.default_value()).iter() {
+            codec::nat(*(x21), out);
         }
         let e = f.entries();
         codec::len(e.len(), out);
@@ -1760,16 +1861,16 @@ fn state_bytes(s: &S, out: &mut Vec<u8>) {
             let k = &k;
             codec::nat(i128::from((k).0), out);
             codec::len((v).len(), out);
-            for x3 in (v).iter() {
-                codec::nat(*(x3), out);
+            for x22 in (v).iter() {
+                codec::nat(*(x22), out);
             }
         }
     }
     {
         let f = &s.waiters;
         codec::len((&f.d).len(), out);
-        for x4 in (&f.d).iter() {
-            codec::nat(i128::from((x4).0), out);
+        for x23 in (&f.d).iter() {
+            codec::nat(i128::from((x23).0), out);
         }
         let ents = f.entries();
         codec::len(ents.len(), out);
@@ -1777,8 +1878,8 @@ fn state_bytes(s: &S, out: &mut Vec<u8>) {
             let k = &Task(*k);
             codec::nat(i128::from((k).0), out);
             codec::len((v).len(), out);
-            for x5 in (v).iter() {
-                codec::nat(i128::from((x5).0), out);
+            for x24 in (v).iter() {
+                codec::nat(i128::from((x24).0), out);
             }
         }
     }

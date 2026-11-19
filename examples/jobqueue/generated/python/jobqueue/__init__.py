@@ -775,11 +775,11 @@ def _fire_s2(s, env):
 
 def _out0(s, out):
     # c_give_up
-    if not ((_ixsome_spent(s) and ((s.st.get(_ixfirst_spent(s)) == 3) and _m_spent(s.tries.get(_ixfirst_spent(s)))))):
+    if not ((_ixsome_spent(s) and (lambda w_j_1: ((s.st.get(w_j_1) == 3) and _m_spent(s.tries.get(w_j_1))))(_ixfirst_spent(s)))):
         return False
-    out.append((0, _ixfirst_spent(s),))
+    out.append((0, (lambda w_j_2: w_j_2)(_ixfirst_spent(s)),))
     _p_st = []
-    _p_st.append((0, _ixfirst_spent(s), 5))
+    _p_st.append((0, (lambda w_j_3: w_j_3)(_ixfirst_spent(s)), 5))
     _p_entered = []
     _p_entered.append((0, 5, (s.entered.get(5) + 1)))
     _run(s.st, _p_st)
@@ -789,12 +789,12 @@ def _out0(s, out):
 
 def _out1(s, out):
     # c_retry
-    if not ((_ixsome_retryable(s) and ((s.st.get(_ixfirst_retryable(s)) == 3) and (not _m_spent(s.tries.get(_ixfirst_retryable(s))))))):
+    if not ((_ixsome_retryable(s) and (lambda w_j_4: ((s.st.get(w_j_4) == 3) and (not _m_spent(s.tries.get(w_j_4)))))(_ixfirst_retryable(s)))):
         return False
-    out.append((1, _ixfirst_retryable(s),))
+    out.append((1, (lambda w_j_5: w_j_5)(_ixfirst_retryable(s)),))
     _p_st = []
-    _p_st.append((0, _ixfirst_retryable(s), 1))
-    _n_Q = (s.Q | (frozenset() | frozenset((_ixfirst_retryable(s),))))
+    _p_st.append((0, (lambda w_j_6: w_j_6)(_ixfirst_retryable(s)), 1))
+    _n_Q = (s.Q | (frozenset() | frozenset(((lambda w_j_7: w_j_7)(_ixfirst_retryable(s)),))))
     _p_entered = []
     _p_entered.append((0, 1, (s.entered.get(1) + 1)))
     _run(s.st, _p_st)
@@ -805,19 +805,19 @@ def _out1(s, out):
 
 def _out2(s, out):
     # c_start
-    if not (((s.Q != frozenset()) and ((_least(s.Q) in s.Q) and (s.slots > 0)))):
+    if not (((s.Q != frozenset()) and (lambda w_j_8: ((w_j_8 in s.Q) and (s.slots > 0)))(_least(s.Q)))):
         return False
-    out.append((2, _least(s.Q),))
+    out.append((2, (lambda w_j_9: w_j_9)(_least(s.Q)),))
     _p_st = []
-    _p_st.append((0, _least(s.Q), 2))
+    _p_st.append((0, (lambda w_j_10: w_j_10)(_least(s.Q)), 2))
     _p_tries = []
-    _p_tries.append((0, _least(s.Q), (s.tries.get(_least(s.Q)) + 1)))
-    _n_Q = (s.Q - (frozenset() | frozenset((_least(s.Q),))))
+    _p_tries.append((0, (lambda w_j_11: w_j_11)(_least(s.Q)), (lambda w_j_12: (s.tries.get(w_j_12) + 1))(_least(s.Q))))
+    _n_Q = (s.Q - (frozenset() | frozenset(((lambda w_j_13: w_j_13)(_least(s.Q)),))))
     _n_slots = _int2nat((s.slots - 1))
     _p_entered = []
     _p_entered.append((0, 2, (s.entered.get(2) + 1)))
     _p_byTries = []
-    _p_byTries.append((0, (s.tries.get(_least(s.Q)) + 1), (s.byTries.get((s.tries.get(_least(s.Q)) + 1)) + 1)))
+    _p_byTries.append((0, (lambda w_j_14: (s.tries.get(w_j_14) + 1))(_least(s.Q)), (lambda w_j_15: (s.byTries.get((s.tries.get(w_j_15) + 1)) + 1))(_least(s.Q))))
     _run(s.st, _p_st)
     _run(s.tries, _p_tries)
     _run(s.entered, _p_entered)
