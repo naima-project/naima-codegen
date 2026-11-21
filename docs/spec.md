@@ -696,12 +696,23 @@ Let the output summands be numbered `1 … m` in policy order. For output summan
 with sum variables `x̄`, condition `c_j`, selectors `t̄` with conditions `w̄`, and
 equality-fixed variables `ȳ := ū`:
 
-1. `σ_j` is the substitution `x̄ := t̄, ȳ := ū`, applied in the order of the
-   selector table and then of the equalities; `c'_j = w_j && c_j[σ_j]`, where
+1. `σ_j` is the substitution `ȳ := ū` of the equality-fixed variables; the
+   selected variables `x̄` are bound, not substituted: every expression `e` of the
+   summand that reads some `x_k` (its condition, each action argument, each
+   right side) becomes `e whr x_k = t_k end`, one `whr` per selected variable it
+   needs (those it reads and those their selectors read, the first selected
+   outermost), so that a selector is written, and evaluated, once per expression
+   and not once per occurrence. `c'_j = w_j && c_j[σ_j]` with its bindings, where
    `w_j` is the conjunction of the selectors' `when` terms (`true` when there are
-   none). The refined summand has no sum variable; its action arguments and
-   next-state assignments are those of `j` under `σ_j`, plus the upkeep of the
-   entry-order indexes (§3.7.4).
+   none), each bound only by the selectors before its own. The right side of a
+   function or set parameter keeps its shape (`p[i -> v]`, `p + {x}`, `p - {x}`
+   under `if`): its indices, values, elements and conditions are bound one by
+   one. The refined summand has no sum variable; its action arguments and
+   next-state assignments are those of `j` under `σ_j` with their bindings, plus
+   the upkeep of the entry-order indexes (§3.7.4). (A selector of several cases
+   used in several summands, copied at every occurrence, made a refined Core
+   grow with the product of the two: 971 copies of one choice in VoxLogicA-2's
+   frame model.)
 2. The refined condition of output summand `j` is
    `c'_j && !c'_1 && ... && !c'_(j-1)`: it fires only when no output before it in the
    policy is enabled.
@@ -1427,9 +1438,17 @@ native driver instead (§3.16.5).
 #### 3.11.5 Stored functions
 
 A function-sorted parameter is a `Fun<K, V>`: its default and the entries that differ
-from it. The entries at a key of an id sort (§3.3.3) are held in a vector indexed by the
-id, those at any other key in a map ordered by key; the trait `FunKey` says which (an id
-type's `dense` is its index). An id's entry then costs the size of `V` (a map's entry
+from it. The entries at a key of an id sort (§3.3.3) are held in pages of `PAGE` (256)
+consecutive ids, each page a vector indexed by the id and a count of its entries that
+differ from the default; a page whose entries are all the default again is freed. Those
+at any other key are in a map ordered by key; the trait `FunKey` says which (an id
+type's `dense` is its index). An id's number is never reused, but its storage is: a
+model that sets a dropped instance's columns back to their defaults keeps pages for the
+ids around its live instances only, where a vector grown to the largest id kept one
+entry per instance ever made (VoxLogicA-2's frame model, 2026-11-11: about 1 KB of
+columns per loop element, 10^5 elements). A per-id growing list (`Adj`, §3.10.3) keeps
+its per-id slots in pages the same way; an id whose list is the default again has none.
+An id's entry then costs the size of `V` (a map's entry
 costs the key, the value and the map's own nodes, several times that), and reading or
 writing it is an index, not a search: the columns of a model whose ids number in the
 millions (VoxLogicA's deciding part: 78 columns over nodes, 1.49 KB a node as maps)

@@ -124,13 +124,13 @@ eqn ix_i >= ix_bound_queue(ix_p_nt) -> ix_first_queue(ix_p_st, ix_p_rank, ix_p_n
 % ---- the enabledness of the refined outputs (docs/spec.md §3.7.2)
 map ix_en_0: (Task -> Phase) # (Task -> List(Task)) # List(Task) -> Bool;
 var ix_p_st: Task -> Phase; ix_p_waiters: Task -> List(Task); ix_p_ix_telling: List(Task);
-eqn ix_en_0(ix_p_st, ix_p_waiters, ix_p_ix_telling) = ((ix_some_telling(ix_p_ix_telling))) && ((ix_p_st((ix_first_telling(ix_p_ix_telling))) == Done && ix_p_waiters((ix_first_telling(ix_p_ix_telling))) != [] && (head(ix_p_waiters((ix_first_telling(ix_p_ix_telling))))) == head(ix_p_waiters((ix_first_telling(ix_p_ix_telling))))));
+eqn ix_en_0(ix_p_st, ix_p_waiters, ix_p_ix_telling) = ((ix_some_telling(ix_p_ix_telling))) && (((ix_p_st(x) == Done && ix_p_waiters(x) != [] && (head(ix_p_waiters(x))) == head(ix_p_waiters(x))) whr x = ix_first_telling(ix_p_ix_telling) end));
 map ix_en_1: (Task -> Phase) # (Task -> List(Task)) # List(Task) -> Bool;
 var ix_p_st: Task -> Phase; ix_p_waiters: Task -> List(Task); ix_p_ix_droppable: List(Task);
-eqn ix_en_1(ix_p_st, ix_p_waiters, ix_p_ix_droppable) = ((ix_some_droppable(ix_p_ix_droppable))) && ((ix_p_st((ix_first_droppable(ix_p_ix_droppable))) == Done && ix_p_waiters((ix_first_droppable(ix_p_ix_droppable))) == []));
+eqn ix_en_1(ix_p_st, ix_p_waiters, ix_p_ix_droppable) = ((ix_some_droppable(ix_p_ix_droppable))) && (((ix_p_st(x) == Done && ix_p_waiters(x) == []) whr x = ix_first_droppable(ix_p_ix_droppable) end));
 map ix_en_2: Nat # (Task -> Phase) # (Task -> List(Nat)) -> Bool;
 var ix_p_nt: Nat; ix_p_st: Task -> Phase; ix_p_rank: Task -> List(Nat);
-eqn ix_en_2(ix_p_nt, ix_p_st, ix_p_rank) = ((ix_some_queue(ix_p_st, ix_p_rank, ix_p_nt, 0))) && ((ix_p_st((ix_first_queue(ix_p_st, ix_p_rank, ix_p_nt, 0, task(0), false))) == Queued));
+eqn ix_en_2(ix_p_nt, ix_p_st, ix_p_rank) = ((ix_some_queue(ix_p_st, ix_p_rank, ix_p_nt, 0))) && (((ix_p_st(x) == Queued) whr x = ix_first_queue(ix_p_st, ix_p_rank, ix_p_nt, 0, task(0), false) end));
 map ix_quiet: Nat # (Task -> Phase) # (Task -> List(Nat)) # (Task -> List(Task)) # List(Task) # List(Task) -> Bool;
 var ix_p_nt: Nat; ix_p_st: Task -> Phase; ix_p_rank: Task -> List(Nat); ix_p_waiters: Task -> List(Task); ix_p_ix_telling: List(Task); ix_p_ix_droppable: List(Task);
 eqn ix_quiet(ix_p_nt, ix_p_st, ix_p_rank, ix_p_waiters, ix_p_ix_telling, ix_p_ix_droppable) = !ix_en_0(ix_p_st, ix_p_waiters, ix_p_ix_telling) && !ix_en_1(ix_p_st, ix_p_waiters, ix_p_ix_droppable) && !ix_en_2(ix_p_nt, ix_p_st, ix_p_rank);
@@ -190,30 +190,30 @@ sum x: Task, y: Task .
 
  + % c_tell output c_tell
 (ix_en_0(st, waiters, ix_telling)) ->
-    c_tell((head(waiters((ix_first_telling(ix_telling))))), (ix_first_telling(ix_telling))) .
-    Core(waiters = waiters[(ix_first_telling(ix_telling)) -> tail(waiters((ix_first_telling(ix_telling))))],
-         missing = missing[(head(waiters((ix_first_telling(ix_telling))))) -> Int2Nat(missing((head(waiters((ix_first_telling(ix_telling)))))) - 1)],
-         st = if(missing((head(waiters((ix_first_telling(ix_telling)))))) == 1, st[(head(waiters((ix_first_telling(ix_telling))))) -> Queued], st),
-         depth = max(depth, #((head(waiters((ix_first_telling(ix_telling))))) |> tail(waiters((ix_first_telling(ix_telling)))))),
-         ix_telling = ix_ins_telling(ix_out_telling(ix_telling, if(ix_a1 && !ix_b1, {(head(waiters((ix_first_telling(ix_telling)))))}, {}) + if(ix_a2 && !ix_b2, {(ix_first_telling(ix_telling))}, {})), if(ix_b1 && !ix_a1, {(head(waiters((ix_first_telling(ix_telling)))))}, {}) + if(ix_b2 && !ix_a2, {(ix_first_telling(ix_telling))}, {}), 0) whr ix_a1 = ix_mem_telling(st, waiters, ((head(waiters((ix_first_telling(ix_telling))))))), ix_b1 = ix_mem_telling((if(missing((head(waiters((ix_first_telling(ix_telling)))))) == 1, st[(head(waiters((ix_first_telling(ix_telling))))) -> Queued], st)), (waiters[(ix_first_telling(ix_telling)) -> tail(waiters((ix_first_telling(ix_telling))))]), ((head(waiters((ix_first_telling(ix_telling))))))), ix_a2 = ix_mem_telling(st, waiters, ((ix_first_telling(ix_telling)))), ix_b2 = ix_mem_telling((if(missing((head(waiters((ix_first_telling(ix_telling)))))) == 1, st[(head(waiters((ix_first_telling(ix_telling))))) -> Queued], st)), (waiters[(ix_first_telling(ix_telling)) -> tail(waiters((ix_first_telling(ix_telling))))]), ((ix_first_telling(ix_telling)))) end,
-         ix_droppable = ix_ins_droppable(ix_out_droppable(ix_droppable, if(ix_a1 && !ix_b1, {(head(waiters((ix_first_telling(ix_telling)))))}, {}) + if(ix_a2 && !ix_b2, {(ix_first_telling(ix_telling))}, {})), if(ix_b1 && !ix_a1, {(head(waiters((ix_first_telling(ix_telling)))))}, {}) + if(ix_b2 && !ix_a2, {(ix_first_telling(ix_telling))}, {}), 0) whr ix_a1 = ix_mem_droppable(st, waiters, ((head(waiters((ix_first_telling(ix_telling))))))), ix_b1 = ix_mem_droppable((if(missing((head(waiters((ix_first_telling(ix_telling)))))) == 1, st[(head(waiters((ix_first_telling(ix_telling))))) -> Queued], st)), (waiters[(ix_first_telling(ix_telling)) -> tail(waiters((ix_first_telling(ix_telling))))]), ((head(waiters((ix_first_telling(ix_telling))))))), ix_a2 = ix_mem_droppable(st, waiters, ((ix_first_telling(ix_telling)))), ix_b2 = ix_mem_droppable((if(missing((head(waiters((ix_first_telling(ix_telling)))))) == 1, st[(head(waiters((ix_first_telling(ix_telling))))) -> Queued], st)), (waiters[(ix_first_telling(ix_telling)) -> tail(waiters((ix_first_telling(ix_telling))))]), ((ix_first_telling(ix_telling)))) end)
+    c_tell(((head(waiters(x))) whr x = ix_first_telling(ix_telling) end), (x whr x = ix_first_telling(ix_telling) end)) .
+    Core(waiters = waiters[(x  whr x = ix_first_telling(ix_telling) end)->( tail(waiters(x)) whr x = ix_first_telling(ix_telling) end)],
+         missing = missing[((head(waiters(x)))  whr x = ix_first_telling(ix_telling) end)->( Int2Nat(missing((head(waiters(x)))) - 1) whr x = ix_first_telling(ix_telling) end)],
+         st = if((missing((head(waiters(x)))) == 1 whr x = ix_first_telling(ix_telling) end), st[((head(waiters(x)))  whr x = ix_first_telling(ix_telling) end)-> Queued], st),
+         depth = (max(depth, #((head(waiters(x))) |> tail(waiters(x)))) whr x = ix_first_telling(ix_telling) end),
+         ix_telling = (ix_ins_telling(ix_out_telling(ix_telling, if(ix_a1 && !ix_b1, {(head(waiters(x)))}, {}) + if(ix_a2 && !ix_b2, {x}, {})), if(ix_b1 && !ix_a1, {(head(waiters(x)))}, {}) + if(ix_b2 && !ix_a2, {x}, {}), 0) whr ix_a1 = ix_mem_telling(st, waiters, ((head(waiters(x))))), ix_b1 = ix_mem_telling((if(missing((head(waiters(x)))) == 1, st[(head(waiters(x))) -> Queued], st)), (waiters[x -> tail(waiters(x))]), ((head(waiters(x))))), ix_a2 = ix_mem_telling(st, waiters, (x)), ix_b2 = ix_mem_telling((if(missing((head(waiters(x)))) == 1, st[(head(waiters(x))) -> Queued], st)), (waiters[x -> tail(waiters(x))]), (x)) end whr x = ix_first_telling(ix_telling) end),
+         ix_droppable = (ix_ins_droppable(ix_out_droppable(ix_droppable, if(ix_a1 && !ix_b1, {(head(waiters(x)))}, {}) + if(ix_a2 && !ix_b2, {x}, {})), if(ix_b1 && !ix_a1, {(head(waiters(x)))}, {}) + if(ix_b2 && !ix_a2, {x}, {}), 0) whr ix_a1 = ix_mem_droppable(st, waiters, ((head(waiters(x))))), ix_b1 = ix_mem_droppable((if(missing((head(waiters(x)))) == 1, st[(head(waiters(x))) -> Queued], st)), (waiters[x -> tail(waiters(x))]), ((head(waiters(x))))), ix_a2 = ix_mem_droppable(st, waiters, (x)), ix_b2 = ix_mem_droppable((if(missing((head(waiters(x)))) == 1, st[(head(waiters(x))) -> Queued], st)), (waiters[x -> tail(waiters(x))]), (x)) end whr x = ix_first_telling(ix_telling) end))
 
  + % c_drop output c_drop
 (ix_en_1(st, waiters, ix_droppable) && !ix_en_0(st, waiters, ix_telling)) ->
-    c_drop((ix_first_droppable(ix_droppable))) .
-    Core(st = st[(ix_first_droppable(ix_droppable)) -> Free],
-         made = made[keyof(label((ix_first_droppable(ix_droppable)))) -> 0],
-         rank = rank[(ix_first_droppable(ix_droppable)) -> []],
-         label = label[(ix_first_droppable(ix_droppable)) -> 0],
-         ix_telling = ix_ins_telling(ix_out_telling(ix_telling, if(ix_a1 && !ix_b1, {(ix_first_droppable(ix_droppable))}, {})), if(ix_b1 && !ix_a1, {(ix_first_droppable(ix_droppable))}, {}), 0) whr ix_a1 = ix_mem_telling(st, waiters, ((ix_first_droppable(ix_droppable)))), ix_b1 = ix_mem_telling((st[(ix_first_droppable(ix_droppable)) -> Free]), waiters, ((ix_first_droppable(ix_droppable)))) end,
-         ix_droppable = ix_ins_droppable(ix_out_droppable(ix_droppable, if(ix_a1 && !ix_b1, {(ix_first_droppable(ix_droppable))}, {})), if(ix_b1 && !ix_a1, {(ix_first_droppable(ix_droppable))}, {}), 0) whr ix_a1 = ix_mem_droppable(st, waiters, ((ix_first_droppable(ix_droppable)))), ix_b1 = ix_mem_droppable((st[(ix_first_droppable(ix_droppable)) -> Free]), waiters, ((ix_first_droppable(ix_droppable)))) end)
+    c_drop((x whr x = ix_first_droppable(ix_droppable) end)) .
+    Core(st = st[(x  whr x = ix_first_droppable(ix_droppable) end)-> Free],
+         made = made[(keyof(label(x))  whr x = ix_first_droppable(ix_droppable) end)-> 0],
+         rank = rank[(x  whr x = ix_first_droppable(ix_droppable) end)-> []],
+         label = label[(x  whr x = ix_first_droppable(ix_droppable) end)-> 0],
+         ix_telling = (ix_ins_telling(ix_out_telling(ix_telling, if(ix_a1 && !ix_b1, {x}, {})), if(ix_b1 && !ix_a1, {x}, {}), 0) whr ix_a1 = ix_mem_telling(st, waiters, (x)), ix_b1 = ix_mem_telling((st[x -> Free]), waiters, (x)) end whr x = ix_first_droppable(ix_droppable) end),
+         ix_droppable = (ix_ins_droppable(ix_out_droppable(ix_droppable, if(ix_a1 && !ix_b1, {x}, {})), if(ix_b1 && !ix_a1, {x}, {}), 0) whr ix_a1 = ix_mem_droppable(st, waiters, (x)), ix_b1 = ix_mem_droppable((st[x -> Free]), waiters, (x)) end whr x = ix_first_droppable(ix_droppable) end))
 
  + % c_start output c_start
 (ix_en_2(nt, st, rank) && !ix_en_0(st, waiters, ix_telling) && !ix_en_1(st, waiters, ix_droppable)) ->
-    c_start((ix_first_queue(st, rank, nt, 0, task(0), false))) .
-    Core(st = st[(ix_first_queue(st, rank, nt, 0, task(0), false)) -> Running],
-         ix_telling = ix_ins_telling(ix_out_telling(ix_telling, if(ix_a1 && !ix_b1, {(ix_first_queue(st, rank, nt, 0, task(0), false))}, {})), if(ix_b1 && !ix_a1, {(ix_first_queue(st, rank, nt, 0, task(0), false))}, {}), 0) whr ix_a1 = ix_mem_telling(st, waiters, ((ix_first_queue(st, rank, nt, 0, task(0), false)))), ix_b1 = ix_mem_telling((st[(ix_first_queue(st, rank, nt, 0, task(0), false)) -> Running]), waiters, ((ix_first_queue(st, rank, nt, 0, task(0), false)))) end,
-         ix_droppable = ix_ins_droppable(ix_out_droppable(ix_droppable, if(ix_a1 && !ix_b1, {(ix_first_queue(st, rank, nt, 0, task(0), false))}, {})), if(ix_b1 && !ix_a1, {(ix_first_queue(st, rank, nt, 0, task(0), false))}, {}), 0) whr ix_a1 = ix_mem_droppable(st, waiters, ((ix_first_queue(st, rank, nt, 0, task(0), false)))), ix_b1 = ix_mem_droppable((st[(ix_first_queue(st, rank, nt, 0, task(0), false)) -> Running]), waiters, ((ix_first_queue(st, rank, nt, 0, task(0), false)))) end)
+    c_start((x whr x = ix_first_queue(st, rank, nt, 0, task(0), false) end)) .
+    Core(st = st[(x  whr x = ix_first_queue(st, rank, nt, 0, task(0), false) end)-> Running],
+         ix_telling = (ix_ins_telling(ix_out_telling(ix_telling, if(ix_a1 && !ix_b1, {x}, {})), if(ix_b1 && !ix_a1, {x}, {}), 0) whr ix_a1 = ix_mem_telling(st, waiters, (x)), ix_b1 = ix_mem_telling((st[x -> Running]), waiters, (x)) end whr x = ix_first_queue(st, rank, nt, 0, task(0), false) end),
+         ix_droppable = (ix_ins_droppable(ix_out_droppable(ix_droppable, if(ix_a1 && !ix_b1, {x}, {})), if(ix_b1 && !ix_a1, {x}, {}), 0) whr ix_a1 = ix_mem_droppable(st, waiters, (x)), ix_b1 = ix_mem_droppable((st[x -> Running]), waiters, (x)) end whr x = ix_first_queue(st, rank, nt, 0, task(0), false) end))
  + sum x: Task, v: Task . ((st(x) == Done && waiters(x) != [] && v == head(waiters(x)))) -> probe_enabled . Core()
  + sum x: Task . ((st(x) == Done && waiters(x) == [])) -> probe_enabled . Core()
  + sum x: Task . ((st(x) == Queued)) -> probe_enabled . Core()
