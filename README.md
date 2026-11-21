@@ -124,6 +124,8 @@ naima-codegen check-refinement --properties [--project DIR] [group...]
 
 `DIR` defaults to the current directory. `python -m naima_codegen` does the
 same as the `naima-codegen` script at the root of this repository.
+On Windows a batch file calls `naima-codegen.cmd`, which starts the script with the Python named by `NAIMA_PYTHON` (the one `naima tools install
+python` installs), or else the `python` on `PATH`.
 `check-refinement` explores each group's model, refined and probe systems and
 checks trace inclusion, non-blocking, that every step ends, that labels select
 one summand, that every event is accepted, and that no observer fires (§3.9).
