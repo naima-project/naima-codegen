@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Trace inclusion ignores the observers' steps
+
+`check-refinement` compared the refined system with the model by the strong `trace-ac` preorder, under which the
+hidden observer steps still count: a model that breaks an invariant, so that an observer fires, also failed trace
+inclusion and the refinement was blamed. It now uses `weak-trace-ac` (docs/spec.md §3.9.2). A fired observer is
+reported only by the separate "observers fired" line.
+
 ### TypeScript a strict project and Node import as it is
 
 The generated TypeScript declared some classes with parameter properties (`constructor(readonly b: V)`), which are not

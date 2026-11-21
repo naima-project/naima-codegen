@@ -106,7 +106,7 @@ def check(proj, group: str, work: Path, say=print, model: bool = True) -> bool:
     ok &= not obs
     hide = ",".join(observer_labels(proj))
     if model:
-        r = subprocess.run([tool("ltscompare"), "--preorder=trace-ac"] + (["--tau=" + hide] if hide else [])
+        r = subprocess.run([tool("ltscompare"), "--preorder=weak-trace-ac"] + (["--tau=" + hide] if hide else [])
                            + [str(auts["refined"]), str(auts["model"])],
                            capture_output=True, text=True)
         inc = r.stdout.strip().endswith("true")

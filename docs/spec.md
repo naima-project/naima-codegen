@@ -1017,12 +1017,17 @@ For each group, both systems (with Core and with the refined Core) are explored 
 `lps2lts` and compared with
 
 ```sh
-ltscompare --preorder=trace-ac --tau=<observer labels> refined.aut model.aut
+ltscompare --preorder=weak-trace-ac --tau=<observer labels> refined.aut model.aut
 ```
 
 which must report inclusion. The observer labels are every label `o_*` declared in
 `<model>/observers.mcrl2`. They are hidden because the refined system carries the
-observers and the model system does not (§3.9.7). `--no-model` skips this check,
+observers and the model system does not (§3.9.7). The preorder is the weak one
+(`weak-trace-ac`) because the hidden observer steps must not count: the strong
+`trace-ac` preorder still sees a tau step, so a refined system whose observer has
+fired would fail inclusion although its refinement is correct. The observers are hidden
+as tau and fire only where the model itself breaks an invariant; the separate
+"observers fired" line of `check-refinement` reports that. `--no-model` skips this check,
 for a group whose model system is too large to explore.
 
 Checked on 2026-10-06 on a model of four jobs in a diamond with two workers: a Core

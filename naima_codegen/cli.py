@@ -14,8 +14,8 @@ check-refinement: the checks that the refinement stays inside the model
 each group (default: every group), linearise and explore the three systems
 (mcrl22lps, lps2lts), then on their finite state spaces:
 
-- §3.9.2 trace inclusion: ltscompare --preorder=trace-ac refined model, the
-  observers' labels hidden (--no-model skips it: the model system, Core
+- §3.9.2 trace inclusion: ltscompare --preorder=weak-trace-ac refined model, the
+  observers' labels hidden as tau (the weak preorder ignores their steps) (--no-model skips it: the model system, Core
   without the step structure, can be too large to explore);
 - §3.9.3 non-blocking: no state of the probe system with both a probe_enabled
   and a probe_quiet transition; the states where a deferred summand is deferred
