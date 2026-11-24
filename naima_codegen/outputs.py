@@ -33,6 +33,12 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+def _sha_text(p: Path) -> str:
+    """The hash of a text file as written with LF: a checkout that converts line endings (Windows, core.autocrlf) holds
+    the same file with CRLF, and `generate --check` must not tell them apart."""
+    return _sha(p.read_bytes().replace(b"\r\n", b"\n"))
+
+
 def generator_sources() -> dict:
     """{name: path} of the generator's own source, which the manifest hashes (§3.15.1)."""
     src = Path(__file__).resolve().parent
@@ -76,7 +82,7 @@ def build(proj, model, toolset: str, tools=None) -> dict:
     costs = _whole_operations(proj, model, rust)
     extra = [proj.m("env.mcrl2"), proj.m("observers.mcrl2")] + sorted(
         proj.m("instances/" + p.name) for p in proj.path(proj.m("instances")).glob("*.mcrl2")) if st is not None else []
-    inputs = {f: _sha(proj.path(f).read_bytes())
+    inputs = {f: _sha_text(proj.path(f))
               for f in [proj.m("core.mcrl2"), proj.m("codegen-init.mcrl2"), proj.toml, policy] + extra if proj.path(f).is_file()}
     lay = layout.layout(model, st)
     over = [(s, v["bytes"], model.config.bytes_per_id[s]) for s, v in lay["rust"].items()
@@ -87,7 +93,7 @@ def build(proj, model, toolset: str, tools=None) -> dict:
                                          "the per-id layout takes %d bytes, over the limit %d" % (b, lim))
                               for s, b, lim in over])
     manifest = {
-        "generator": {k: _sha(p.read_bytes()) for k, p in generator_sources().items()},
+        "generator": {k: _sha_text(p) for k, p in generator_sources().items()},
         "toolset": toolset,
         "inputs": inputs,
         "summands": [{"name": s.name, "kind": model.summand_kind.get(s.name),

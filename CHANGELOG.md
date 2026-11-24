@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `generate --check` is neutral to line endings
+
+The manifest hashed the model's files and the generator's own sources as they lie on disk, so a checkout that converts line
+endings (Windows, `core.autocrlf`) holds them with CRLF and `generate --check` reported the manifest as differing (the
+hash of `naima-codegen` or of an input). It now hashes the text with LF, whatever the checkout holds; the generated files
+were already written with LF and read back with universal newlines. Files with LF hash as before. The hash of
+`naima_codegen/outputs.py` changed with this fix, so a project's manifest is regenerated once (`naima-codegen generate`).
+
 ### Trace inclusion ignores the observers' steps
 
 `check-refinement` compared the refined system with the model by the strong `trace-ac` preorder, under which the
