@@ -7,7 +7,7 @@
 `naima-codegen` and `naima-codegen.cmd` run the tool with `uv run --project`, which downloads the Python that
 `pyproject.toml` pins (3.13) on first use, with no administrator rights; with no uv on the machine uv's official installer is
 run for the user. `NAIMA_PYTHON` still names a Python to run it with instead. `naima-codegen --version` prints the version and
-the commit of the checkout. The generator's own files changed, so a project's manifest is regenerated once.
+the commit of the checkout. `generate --check` also works on Windows now: it named the files under `generated/` with backslashes and reported every file in a subfolder as missing. The generator's own files changed, so a project's manifest is regenerated once.
 
 ### `generate --check` is neutral to line endings
 

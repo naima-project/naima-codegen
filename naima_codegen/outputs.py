@@ -218,7 +218,7 @@ def write(proj, files: dict) -> None:
 def diff(proj, files: dict) -> str | None:
     """The first difference between the generated directory and files, or None (§3.15.3)."""
     gen, GENERATED = proj.gen_dir, proj.generated
-    have = {str(p.relative_to(gen)): p for p in gen.rglob("*") if p.is_file()} if gen.is_dir() else {}
+    have = {p.relative_to(gen).as_posix(): p for p in gen.rglob("*") if p.is_file()} if gen.is_dir() else {}
     for k in sorted(set(have) | set(files)):
         if k not in have:
             return "%s/%s: missing" % (GENERATED, k)
