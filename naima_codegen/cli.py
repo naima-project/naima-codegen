@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 from .errors import GeneratorError
@@ -136,10 +137,28 @@ def check_refinement(root: Path, argv: list) -> int:
     return 0 if ok else 1
 
 
+def _version() -> str:
+    """`naima-codegen <version>`, and the commit of the git checkout it runs from when it is one."""
+    import subprocess
+
+    here = Path(__file__).resolve().parent.parent
+    version = tomllib.loads((here / "pyproject.toml").read_text())["project"]["version"]
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(here), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        head = ""
+    return f"naima-codegen {version} ({head})" if len(head) == 40 else f"naima-codegen {version}"
+
+
 def main(argv: list | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] in (["-h"], ["--help"]):
         print(__doc__.strip())
+        return 0
+    if argv[:1] == ["--version"]:
+        print(_version())
         return 0
     parsed = _project_arg(argv[1:]) if argv else None
     if parsed is None or argv[0] not in ("generate", "check-refinement"):

@@ -122,10 +122,15 @@ naima-codegen check-refinement [--project DIR] [--no-model] [group...]
 naima-codegen check-refinement --properties [--project DIR] [group...]
 ```
 
-`DIR` defaults to the current directory. `python -m naima_codegen` does the
-same as the `naima-codegen` script at the root of this repository.
-On Windows a batch file calls `naima-codegen.cmd`, which starts the script with the Python named by `NAIMA_PYTHON` (the one `naima tools install
-python` installs), or else the `python` on `PATH`.
+`DIR` defaults to the current directory. `naima-codegen --version` prints the version.
+
+`naima-codegen` (a shell script) and `naima-codegen.cmd` (its twin for Windows, which a
+batch file calls) run the tool through [uv](https://docs.astral.sh/uv/): uv downloads the
+Python that `pyproject.toml` pins (3.13) on first use, into the user's own folders, so
+the machine needs neither a Python nor administrator rights. The uv is `$NAIMA_UV`, else
+the one on `PATH`, else `~/.local/bin/uv`; with none, uv's official standalone installer
+is run for the user. `NAIMA_PYTHON`, when set, names a Python to run it with instead
+(`python -m naima_codegen` does the same), and uv is then not used.
 `check-refinement` explores each group's model, refined and probe systems and
 checks trace inclusion, non-blocking, that every step ends, that labels select
 one summand, that every event is accepted, and that no observer fires (§3.9).

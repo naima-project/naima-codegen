@@ -1,12 +1,40 @@
-#!/usr/bin/env python3
-"""naima-codegen: the code generator's command line (naima_codegen/cli.py, docs/spec.md §3.6.9)."""
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from naima_codegen.cli import main  # noqa: E402
-
-if __name__ == "__main__":
-    sys.exit(main())
+#!/bin/sh
+# naima-codegen: the code generator's command line (naima_codegen/cli.py).
+#
+# It runs through uv, which downloads the Python that pyproject.toml pins (and its libraries) on first use into
+# the user's own folders: no administrator rights and no Python on the machine are needed. The uv is, in order:
+# $NAIMA_UV, the one on PATH, ~/.local/bin/uv, else uv's official standalone installer is run for this user.
+# NAIMA_PYTHON, when set, names the Python to run it with instead, and uv is not used.
+self=$0
+while [ -L "$self" ]; do
+  d=$(cd "$(dirname "$self")" && pwd -P)
+  self=$(readlink "$self")
+  case $self in /*) ;; *) self=$d/$self ;; esac
+done
+ROOT=$(cd "$(dirname "$self")" && pwd -P)
+PYTHONPATH=$ROOT${PYTHONPATH:+:$PYTHONPATH}
+export PYTHONPATH
+if [ -n "${NAIMA_PYTHON:-}" ]; then
+  exec "$NAIMA_PYTHON" -m naima_codegen "$@"
+fi
+UV=
+if [ -n "${NAIMA_UV:-}" ]; then
+  UV=$NAIMA_UV
+elif command -v uv >/dev/null 2>&1; then
+  UV=$(command -v uv)
+elif [ -x "$HOME/.local/bin/uv" ]; then
+  UV=$HOME/.local/bin/uv
+else
+  echo "naima-codegen: uv not found, installing it for this user (https://astral.sh/uv)" >&2
+  if command -v curl >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh >&2
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh >&2
+  fi
+  [ -x "$HOME/.local/bin/uv" ] && UV=$HOME/.local/bin/uv
+fi
+if [ -z "$UV" ]; then
+  echo "naima-codegen: no uv, and it could not be installed: install uv (https://docs.astral.sh/uv/) or set NAIMA_UV to it, or set NAIMA_PYTHON to a Python 3.11 or later" >&2
+  exit 78
+fi
+exec "$UV" run --project "$ROOT" --no-dev --frozen --quiet python -m naima_codegen "$@"

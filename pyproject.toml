@@ -1,0 +1,10 @@
+[project]
+name = "naima-codegen"
+version = "0.1.0"
+description = "Naima's code generator: a model's state machine written as code"
+requires-python = "==3.13.*"
+dependencies = []
+
+[tool.uv]
+# An application run in place by its launcher (naima-codegen, naima-codegen.cmd), never installed as a package.
+package = false
