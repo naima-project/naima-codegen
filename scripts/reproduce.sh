@@ -35,6 +35,7 @@ trap 'rm -rf "$OUT"' EXIT
 # --- uv and the Python
 UV=${NAIMA_UV:-$(command -v uv 2>/dev/null || true)}
 [ -z "$UV" ] && [ -x "$HOME/.local/bin/uv" ] && UV=$HOME/.local/bin/uv
+if [ -n "$UV" ]; then echo "found uv: $UV"; fi
 if [ -z "$UV" ]; then
   echo "reproduce: uv is not installed. Install it from https://docs.astral.sh/uv/ and run this again." >&2
   exit 2
@@ -44,6 +45,11 @@ CG="$ROOT/naima-codegen"
 
 # --- the Rust toolchain
 HAVE_CARGO=0
+if ! command -v cargo >/dev/null 2>&1 && ! command -v rustup >/dev/null 2>&1 && [ -d "${CARGO_HOME:-$HOME/.cargo}/bin" ]; then
+  PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"; export PATH
+fi
+[ -n "$(command -v rustup 2>/dev/null)" ] && echo "found rustup: $(command -v rustup)"
+[ -n "$(command -v cargo 2>/dev/null)" ] && echo "found cargo: $(command -v cargo)"
 if command -v rustup >/dev/null 2>&1; then
   if rustup toolchain install "$RUST" --profile minimal -c clippy -c rustfmt >"$OUT/rust.log" 2>&1; then
     ok "Rust $RUST (rustup)"; HAVE_CARGO=1
@@ -56,13 +62,25 @@ fi
 
 # --- mCRL2
 HAVE_MCRL2=0
-V=$(mcrl22lps --version 2>&1 | sed -n 's/.*mCRL2 toolset \([^ ]*\).*/\1/p' | head -n 1)
+mcrl2_version() { "$1" --version 2>&1 | sed -n 's/.*mCRL2 toolset \([^ ]*\).*/\1/p' | head -n 1; }
+V=
+if command -v mcrl22lps >/dev/null 2>&1; then V=$(mcrl2_version "$(command -v mcrl22lps)"); fi
+if [ "$V" != "$MCRL2" ]; then
+  # not on PATH, or another release: look in the standard install places
+  OLDIFS=$IFS; IFS=:
+  for d in $MCRL2_DIRS; do
+    d=$(printf '%s' "$d" | sed "s#^~#$HOME#; s#{MCRL2}#$MCRL2#")
+    if [ -x "$d/mcrl22lps" ] && [ "$(mcrl2_version "$d/mcrl22lps")" = "$MCRL2" ]; then PATH="$d:$PATH"; export PATH; V=$MCRL2; break; fi
+  done
+  IFS=$OLDIFS
+fi
+[ "$V" = "$MCRL2" ] && echo "found mCRL2 $V: $(command -v mcrl22lps)"
 if [ -z "$V" ]; then
   skip "mCRL2: the tools are not on PATH (release $MCRL2 is needed), so regeneration, refinement and properties are skipped"
 elif [ "$V" != "$MCRL2" ]; then
   skip "mCRL2: release $V is on PATH, the pin is $MCRL2, so regeneration, refinement and properties are skipped"
 else
-  ok "mCRL2 $MCRL2 on PATH"; HAVE_MCRL2=1
+  ok "mCRL2 $MCRL2"; HAVE_MCRL2=1
 fi
 
 # --- regenerate and compare
@@ -75,6 +93,10 @@ if [ $HAVE_MCRL2 = 1 ]; then
 else
   skip "generate --check of every example"
 fi
+
+# --- Deno, for the TypeScript tests only
+if ! command -v deno >/dev/null 2>&1 && [ -x "$HOME/.deno/bin/deno" ]; then PATH="$HOME/.deno/bin:$PATH"; export PATH; fi
+[ -n "$(command -v deno 2>/dev/null)" ] && echo "found deno: $(command -v deno)"
 
 # --- the test suite
 if [ $RUN_TESTS = 1 ]; then

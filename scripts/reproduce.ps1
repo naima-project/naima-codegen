@@ -37,6 +37,8 @@ try {
   $CG = Join-Path $Root "naima-codegen.cmd"
 
   # --- the Rust toolchain
+  if (-not (Have "cargo") -and -not (Have "rustup") -and (Test-Path "$env:USERPROFILE\.cargo\bin")) { $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH" }
+  foreach ($t in "rustup", "cargo") { if (Have $t) { Write-Host "found ${t}: $((Get-Command $t).Source)" } }
   $HaveCargo = $false
   if (Have "rustup") {
     rustup toolchain install $V.RUST --profile minimal -c clippy -c rustfmt *> "$Out\rust.log"
@@ -54,9 +56,22 @@ try {
     $first = (& mcrl22lps --version 2>&1 | Select-Object -First 1) | Out-String
     if ($first -match 'mCRL2 toolset (\S+)') { $Found = $Matches[1] }
   }
+  if ($Found -ne $V.MCRL2) {
+    # not on PATH, or another release: the standard install places
+    $dirs = @("$env:ProgramFiles\mCRL2\bin", "$env:ProgramFiles\mCRL2 $($V.MCRL2)\bin", "$env:USERPROFILE\mcrl2-$($V.MCRL2)\bin") + @(Get-ChildItem "$env:ProgramFiles\mCRL2*" -Directory -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName)\bin" })
+    foreach ($d in $dirs) {
+      if (Test-Path "$d\mcrl22lps.exe") {
+        $first = (& "$d\mcrl22lps.exe" --version 2>&1 | Select-Object -First 1) | Out-String
+        if (($first -match 'mCRL2 toolset (\S+)') -and ($Matches[1] -eq $V.MCRL2)) { $env:PATH = "$d;$env:PATH"; $Found = $Matches[1]; break }
+      }
+    }
+  }
+  if ($Found) { Write-Host "found mCRL2 ${Found}: $((Get-Command mcrl22lps -ErrorAction SilentlyContinue).Source)" }
+  if (-not (Have "deno") -and (Test-Path "$env:USERPROFILE\.deno\bin\deno.exe")) { $env:PATH = "$env:USERPROFILE\.deno\bin;$env:PATH" }
+  if (Have "deno") { Write-Host "found deno: $((Get-Command deno).Source)" }
   if (-not $Found) { Skip "mCRL2: the tools are not on PATH (release $($V.MCRL2) is needed), so regeneration, refinement and properties are skipped" }
   elseif ($Found -ne $V.MCRL2) { Skip "mCRL2: release $Found is on PATH, the pin is $($V.MCRL2), so regeneration, refinement and properties are skipped" }
-  else { Ok "mCRL2 $($V.MCRL2) on PATH"; $HaveMcrl2 = $true }
+  else { Ok "mCRL2 $($V.MCRL2)"; $HaveMcrl2 = $true }
 
   $Examples = Get-ChildItem (Join-Path $Root "examples") -Directory | Sort-Object Name
 

@@ -139,6 +139,8 @@ def _mini_root() -> str:
 
 def _cargo(d: Path, lib: str, main: str | None = None, name: str = "cases") -> subprocess.CompletedProcess:
     """Builds lib (and main, a binary) as a standalone crate; clippy without main."""
+    if shutil.which("cargo") is None:
+        raise unittest.SkipTest("cargo is not installed")
     from naima_codegen import rustback
 
     (d / "src").mkdir()

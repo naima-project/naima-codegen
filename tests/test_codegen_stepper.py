@@ -335,6 +335,8 @@ class Policy(unittest.TestCase):
 
 def _run_rust_sequences(model, types, m, seqs, package=PACKAGE, crate=GEN / "rust" / PACKAGE) -> list:
     """Each sequence through the crate: lines as CrossCheck._python writes them (test_codegen_typescript.py)."""
+    if shutil.which("cargo") is None:
+        raise unittest.SkipTest("cargo is not installed")
     from naima_codegen import rustback
 
     cfg_params = [p for p in model.params if p.role == "config"]
