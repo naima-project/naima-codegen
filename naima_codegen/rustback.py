@@ -41,6 +41,8 @@ _TAKEN = {"Err", "Ok", "Option", "Some", "None", "Result", "Vec", "String", "Box
           "StepError", "Reject", "Config", "State", "Event", "Action", "Entry", "Acceptor", "S", "BTreeMap",
           "BTreeSet", "M2"}
 
+_STD_IMPORT = "use std::collections::{BTreeMap, BTreeSet, VecDeque};"
+
 RUNTIME = r'''
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing,
@@ -2312,6 +2314,9 @@ def emit(model, st=None, package: str = "generated", workspace: bool = False) ->
     if st is not None:
         out += _emit_stepper(em, model, st, inputs, outputs)
     lib = "\n".join(out) + "\n"
+    if not re.search(r"(?<![:\w])VecDeque\b", lib.replace(_STD_IMPORT, "", 1)):
+        # the import only where a queue parameter uses it, so a model without one builds without a warning
+        lib = lib.replace(_STD_IMPORT, "use std::collections::{BTreeMap, BTreeSet};", 1)
     cargo = _header_block("#") + cargo_toml(package, workspace)
     return {"Cargo.toml": cargo, "src/lib.rs": lib}
 

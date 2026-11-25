@@ -14,7 +14,7 @@
          unused_parens, clippy::all, clippy::pedantic, dead_code, unreachable_patterns, irrefutable_let_patterns,
          missing_debug_implementations, unreachable_pub)]
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// An error of the generated code (docs/spec.md §3.14.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
