@@ -1,0 +1,243 @@
+{
+  "files": {
+    "model/core-probe.mcrl2": "1c95400912fd96d28ca66dd8cce551e8141df4a9807e4b615b9793711e926354",
+    "model/core-refined.mcrl2": "40193b24becf420a1ddde8fd3a7f7c42ceb636ccc744d6db116af8c08a1adf63",
+    "model/probe.mcf": "2afe9bc39c9ff89798a0387228c6cdf43d7e3094dac9b8ae3f17e5c1f8b6a39d",
+    "model/systems/small-model.mcrl2": "92d00f61ebce153a68b5d9176fe957280954e753d77a32afb0fce05cb6b6faef",
+    "model/systems/small-probe.mcrl2": "2e65e68cbab7898557c9c85be636b52d96ee579450711ba3b903d64d626ef4e4",
+    "model/systems/small-refined.mcrl2": "552c41fadd8bf312212f4216069243e4a078229a3661662e428bb81aefa3503e",
+    "rust/scheduler/Cargo.toml": "f74a4254d738cfa97c8aee67f8f4cc3707283e31a68e1fe7aa85d0097230cf28",
+    "rust/scheduler/src/lib.rs": "5f7335b2a35a9599d4cade9ea360926f77cdafa3e1d364e19825b75892757777",
+    "rust/scheduler_loop/Cargo.toml": "06099b3b8d08fa1be0fe6cd7e1ebc135e7eea28cc9a5bc366d8c23c299c7052b",
+    "rust/scheduler_loop/src/event_loop.rs": "1a227e3f7daae8d6b8ba1e135e7963b87ec04ac4772e0074135c6ddaf13bab72",
+    "rust/scheduler_loop/src/lib.rs": "737542c277874cc608c239ee766e41ca54ee64f475e7221fc4f529613caa9ea1"
+  },
+  "generator": {
+    "naima-codegen": "f98de0e86254a8be9c135a41da453f6c724855eb4253e0ce982a76c2b45e1fe6",
+    "naima_codegen/__init__.py": "47f989f1fcdec27178005b515d46628a31d15cad8e4aac4dcecd1c5d13ad1723",
+    "naima_codegen/__main__.py": "91a1938b6924036e98a7032ef2188a78fb6467ab6df6876b40443836ea26099d",
+    "naima_codegen/aterm.py": "c412a1cdb5cf139db51e89bcea35f756ac2103b68b25c683254448b358d4018f",
+    "naima_codegen/checks.py": "7f0dca82ba42f8526788a6a3b45f089297093288964616c8dd57bdd2c8db4862",
+    "naima_codegen/cli.py": "9f27f695a7a44220308c1dad453eb059ee9e4028440c5d198c25c69ada3a405a",
+    "naima_codegen/config.py": "7d951f079d88582f57b49e67144b369280ad53919a606ba553300587c8e62e9b",
+    "naima_codegen/errors.py": "d567bb7bde05acb085aa0867ffbb56b7f2ccddc7aab2eb82357099724b9c4eca",
+    "naima_codegen/evaluate.py": "6bff0cf0c273062497f75bc78aea9ffe1abe0f84a3754549bb49b31e9446b0e0",
+    "naima_codegen/expr.py": "e36596d0f1551444b42b69ce051c748187c6cd5f5a13ca451ab3a8386a7a7294",
+    "naima_codegen/frontend.py": "d29d15e7acd70bb73c0bf3eb097fc250647503275d636463a1a8cd4214114e68",
+    "naima_codegen/functions.py": "8cf8fbb9aea0544aaf49724e465b354de90d6b3fda018a5dd8b912c849252c3d",
+    "naima_codegen/header.py": "c545202fc26a6a400591064480be77b3df5855ee88ab36b450bd9e053bfd4493",
+    "naima_codegen/layout.py": "0837de68267bc4585bb9aba1122b13160d6809531aa412e38861fb4157feebbd",
+    "naima_codegen/looprs.py": "1ad4717b890de19c88953d27f80c576e2b441315b013b76b331e6f51cae612cc",
+    "naima_codegen/lower.py": "c9640c8c29359ca27b3577663380a00ab5dbac1649e1d1920b7be9f80c12c3e8",
+    "naima_codegen/lps.py": "a3d47d2d68b4d8e04d2299981129ac240a8df4f852db731cebb571fb9e975497",
+    "naima_codegen/outputs.py": "329d559c14e7584603bccccc942c509a4986f2c4e7fab1856e68ec6637ee933f",
+    "naima_codegen/policy.py": "8e6e45f3f71af347d94acebfd0c6a621a231fb5f391df5bd2b6f6e86ffe9e82a",
+    "naima_codegen/project.py": "337a0f52400055c90b560625a603b0178604ef64749c6e288f2a0016372f0a40",
+    "naima_codegen/pyback.py": "6e6f581a015e8c77076eb0dcf91d1b5b2a9c62594954fd240f527a13dbfbbde4",
+    "naima_codegen/refine.py": "8213839862211d0094920945865aa82ac87f9ddd6e3ff042d567baf14d3b2f07",
+    "naima_codegen/render.py": "8a5f47bd336590430275ece48c3c09e3a5f79c88e4bac24d5ca44e910bf1efff",
+    "naima_codegen/rustback.py": "8dedb28d0d2900516d2a130322873311765d8e5f699590adf15485cb7194b354",
+    "naima_codegen/sortedlists.py": "ca78229145d99c4fac84bd5f64634ccc154ba1a1a1d1ac1270095474e8f9449c",
+    "naima_codegen/source.py": "df13d79547280ceda93475354652579263db29153abe01c54441b6bc4f8501d2",
+    "naima_codegen/stepper.py": "a8b27c95f39f47a89668962722c05654dff3047166456cc0ff5903f84e451d4e",
+    "naima_codegen/systems.py": "641e10ccb7090dd126af819923466d95285d83182f5fe971f0b67d352b64b080",
+    "naima_codegen/toolchain.py": "72159544f0a1cefd2902add26e0ea30a1783ce49aabbfb6d991a418455c464fd",
+    "naima_codegen/tsback.py": "49c806557a6e48f0498addda6c05761d2e9c826cb65048cd89bd47622d35a98e"
+  },
+  "inputs": {
+    "codegen.toml": "e8b1e51c114c0e2724c164d7e38e6193306c62e1583ab345504a31b0921b9a6b",
+    "model/codegen-init.mcrl2": "fc521c360b3329ec2a6114f4d873bfe3fd227e07894a67635b9826970f36974a",
+    "model/core.mcrl2": "9958492b2ec497a71281d57ea02b91b8e8fad3abcb03e2cea75b3fab37db0314",
+    "model/env.mcrl2": "9c84f68a07bb119addb663b7865b58960e9d51b8164c0eb378fe9b3332ba8684",
+    "model/instances/five.mcrl2": "c123e15cd35041dd3a3111c3dd24aecea66676da028b2594fcfb1077bd01b6cc",
+    "model/observers.mcrl2": "11d9e84fbe8363a3b6257b933c0e3268aac0421a17a725e56800f9ca0e69c4c0",
+    "model/policy.toml": "2d82f1426fc7378014d18845ff363141dd843d62c371983a2b10a01cc14d3760"
+  },
+  "layout": {
+    "python": {
+      "Task": {
+        "bit_columns": [
+          "broken",
+          "isgoal",
+          "told"
+        ],
+        "bytes": 30,
+        "columns": {
+          "kids": 8,
+          "missing": 4,
+          "st": 1,
+          "todo": 8,
+          "users": 8
+        },
+        "entries": {
+          "kids": 4,
+          "todo": 4,
+          "users": 4
+        },
+        "index_bits": 5,
+        "stamps": 0
+      }
+    },
+    "rust": {
+      "Task": {
+        "bit_columns": [
+          "broken",
+          "isgoal",
+          "told"
+        ],
+        "bytes": 30,
+        "columns": {
+          "kids": 8,
+          "missing": 4,
+          "st": 1,
+          "todo": 8,
+          "users": 8
+        },
+        "entries": {
+          "kids": 4,
+          "todo": 4,
+          "users": 4
+        },
+        "index_bits": 5,
+        "stamps": 0
+      }
+    }
+  },
+  "stepper": {
+    "deferred": [],
+    "indexes": [
+      {
+        "classes": [],
+        "name": "due",
+        "order": "least",
+        "reads": [
+          "st",
+          "isgoal",
+          "told"
+        ],
+        "sort": "Task"
+      },
+      {
+        "classes": [],
+        "name": "doomed",
+        "order": "least",
+        "reads": [
+          "st",
+          "broken"
+        ],
+        "sort": "Task"
+      },
+      {
+        "classes": [],
+        "name": "telling",
+        "order": "least",
+        "reads": [
+          "st",
+          "todo"
+        ],
+        "sort": "Task"
+      },
+      {
+        "classes": [],
+        "name": "runnable",
+        "order": "least",
+        "reads": [
+          "st",
+          "missing",
+          "broken"
+        ],
+        "sort": "Task"
+      },
+      {
+        "classes": [],
+        "name": "queued",
+        "order": "least",
+        "reads": [
+          "st"
+        ],
+        "sort": "Task"
+      }
+    ]
+  },
+  "summands": [
+    {
+      "cost": [],
+      "kind": "input",
+      "name": "c_define",
+      "policy": null
+    },
+    {
+      "cost": [],
+      "kind": "input",
+      "name": "c_goal",
+      "policy": null
+    },
+    {
+      "cost": [],
+      "kind": "input",
+      "name": "c_run",
+      "policy": null
+    },
+    {
+      "cost": [],
+      "kind": "input",
+      "name": "c_finished",
+      "policy": null
+    },
+    {
+      "cost": [],
+      "kind": "input",
+      "name": "c_failed",
+      "policy": null
+    },
+    {
+      "cost": [],
+      "kind": "output",
+      "name": "c_deliver",
+      "policy": 0
+    },
+    {
+      "cost": [],
+      "kind": "output",
+      "name": "c_tell",
+      "policy": 1
+    },
+    {
+      "cost": [],
+      "kind": "output",
+      "name": "c_abandon",
+      "policy": 2
+    },
+    {
+      "cost": [],
+      "kind": "output",
+      "name": "c_ready",
+      "policy": 3
+    },
+    {
+      "cost": [],
+      "kind": "output",
+      "name": "c_start",
+      "policy": 4
+    },
+    {
+      "cost": [],
+      "kind": "output",
+      "name": "c_finish",
+      "policy": 5
+    }
+  ],
+  "systems": [
+    {
+      "group": "small",
+      "instances": [
+        "five"
+      ]
+    }
+  ],
+  "toolset": "202607.0",
+  "walks": [
+    "adduser",
+    "below"
+  ]
+}

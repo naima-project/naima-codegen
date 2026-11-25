@@ -1,0 +1,2 @@
+% the events posted first are taken
+[(!take(e1))* . halt] false && [(!take(e2))* . halt] false

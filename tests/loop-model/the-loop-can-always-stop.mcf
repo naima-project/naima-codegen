@@ -1,0 +1,2 @@
+% the loop can always stop
+[(!halt)*] <true* . halt> true

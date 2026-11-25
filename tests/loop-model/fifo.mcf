@@ -1,0 +1,2 @@
+% fifo: the events are taken in the order they were posted (no y is taken while the x posted before it waits)
+forall x: Ev, y: Ev . val(x != y) => [true* . post(x) . (!take(x) && !post(y))* . post(y) . (!take(x))* . take(y)] false

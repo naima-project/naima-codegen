@@ -1,0 +1,11 @@
+% observers.mcrl2 -- invariants of the scheduler, for verification only. Each summand is
+% enabled exactly in a reachable state where its invariant fails, and changes nothing.
+% They never reach the generated code.
+% @act
+act o_free: Nat;
+    o_inputs: Task;
+% @summands
+  % never more free workers than workers
+  + (free > w) -> o_free(free) . Core()
+  % a task that runs or is done has every task it reads done
+  + sum t: Task . ((st(t) == RUNNING || st(t) == DONE) && exists k: Task . (k in kids(t) && st(k) != DONE)) -> o_inputs(t) . Core()

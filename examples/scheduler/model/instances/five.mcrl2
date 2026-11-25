@@ -1,0 +1,8 @@
+% @tasks 5
+% five: two workers and five tasks. Tasks 0, 1 and 2 read nothing, so three tasks are ready at once and
+% one of them waits for a worker. Task 3 reads tasks 0 and 1, task 4 reads tasks 2 and 3. Tasks 3 and 4 are
+% the goals. Any task that runs may finish or fail.
+var n: Nat;
+eqn I_w(@I) = 2;  I_n(@I) = 5;
+    I_reads(@I, n) = if(n == 3, [0, 1], if(n == 4, [2, 3], []));
+    I_goal(@I, n) = (n == 3 || n == 4);  I_ng(@I) = 2;

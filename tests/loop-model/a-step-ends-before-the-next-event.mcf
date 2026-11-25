@@ -1,0 +1,3 @@
+% a step ends before the next event
+[true* . take(e1) . (!handle(a2))* . (exists e: Ev . take(e))] false
+&& [true* . take(e2) . (!handle(a3))* . (exists e: Ev . take(e))] false

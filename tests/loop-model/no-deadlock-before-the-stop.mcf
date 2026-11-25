@@ -1,0 +1,2 @@
+% no deadlock before the stop
+[(!halt)*] <true> true

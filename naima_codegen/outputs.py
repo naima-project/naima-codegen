@@ -24,7 +24,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import layout, pyback, rustback, tsback
+from . import layout, looprs, pyback, rustback, tsback
 from .frontend import TOML
 
 
@@ -72,6 +72,13 @@ def build(proj, model, toolset: str, tools=None) -> dict:
     if "rust" in chosen:
         for k, v in rustback.emit(model, st, package=pj["rust_package"], workspace=pj["rust_workspace"]).items():
             files["rust/%s/%s" % (pj["rust_crate"], k)] = v
+        if pj.get("rust_loop"):
+            if st is None:
+                raise GeneratorError([Diagnostic("G6", proj.toml, "project.rust_loop", "§3.19",
+                                                 "the handler crate needs the stepper, so a policy.toml")])
+            for k, v in looprs.emit(model, rustback.Emitter(st.model), pj["rust_package"], pj["rust_crate"],
+                                    pj["rust_workspace"], pj["rust_loop"]).items():
+                files["rust/%s/%s" % (pj["rust_loop"], k)] = v
     if "typescript" in chosen:
         for k, v in tsback.emit(model, st, module=pj["typescript_module"]).items():
             files["typescript/%s/%s" % (pj["typescript_module"], k)] = v

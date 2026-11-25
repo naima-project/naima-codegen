@@ -1,0 +1,138 @@
+# codegen.toml -- what naima-codegen needs to know about the pool scheduler (naima-codegen's
+# docs/spec.md §3.6): the toolset version, the process parameters with their roles,
+# and every action with its kind. The stepper goes to generated/rust/scheduler/, the handlers and the event loop to generated/rust/scheduler_loop/.
+mcrl2_version = "202607.0"
+id_sorts = ["Task"]
+
+[project]
+backends = ["rust"]
+rust_crate = "scheduler"
+rust_loop = "scheduler_loop"
+properties = "properties"
+
+[widths]
+Nat = "u32"
+
+[[parameter]]
+name = "w"
+role = "config"
+
+[[parameter]]
+name = "nt"
+role = "scalar"
+
+[[parameter]]
+name = "begun"
+role = "scalar"
+
+[[parameter]]
+name = "ended"
+role = "scalar"
+
+[[parameter]]
+name = "free"
+role = "scalar"
+init = "w"
+
+[[parameter]]
+name = "pending"
+role = "scalar"
+
+[[parameter]]
+name = "settled"
+role = "scalar"
+
+[[parameter]]
+name = "st"
+role = "column"
+
+[[parameter]]
+name = "kids"
+role = "column"
+
+[[parameter]]
+name = "isgoal"
+role = "column"
+
+[[parameter]]
+name = "told"
+role = "column"
+
+[[parameter]]
+name = "users"
+role = "column"
+
+[[parameter]]
+name = "missing"
+role = "column"
+
+[[parameter]]
+name = "broken"
+role = "column"
+
+[[parameter]]
+name = "todo"
+role = "column"
+
+[[action]]
+label = "c_tell"
+kind = "output"
+args = ["from", "to"]
+
+[[action]]
+label = "c_define"
+kind = "input"
+args = ["task", "reads"]
+
+[[action]]
+label = "c_goal"
+kind = "input"
+args = ["task"]
+
+[[action]]
+label = "c_run"
+kind = "input"
+args = []
+
+[[action]]
+label = "c_finished"
+kind = "input"
+args = ["task"]
+
+[[action]]
+label = "c_failed"
+kind = "input"
+args = ["task"]
+
+[[action]]
+label = "c_ready"
+kind = "output"
+args = ["task"]
+
+[[action]]
+label = "c_start"
+kind = "output"
+args = ["task"]
+
+[[action]]
+label = "c_abandon"
+kind = "output"
+args = ["task"]
+
+[[action]]
+label = "c_deliver"
+kind = "output"
+args = ["task", "ok"]
+
+[[action]]
+label = "c_finish"
+kind = "output"
+args = []
+
+# The systems the properties are checked on: one instance, the five tasks.
+[systems.groups]
+small = ["five"]
+
+[systems.ids.Task]
+prefix = "T"
+header = "tasks"

@@ -1,0 +1,2 @@
+% No deadlock: until the run is over, some step is always possible.
+[(!finish)*] <true> true

@@ -1,0 +1,6 @@
+{
+  "title": "No task starts before the tasks it reads are finished",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/no-task-before-inputs.mcf"
+}

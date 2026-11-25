@@ -1,0 +1,6 @@
+% Every goal delivered: after a goal is given, its result is delivered, as done or as
+% failed, on every way the run can go on. Along the way every run keeps going until it
+% ends (see no-deadlock), so this holds without a fairness assumption when the
+% environment answers each task it was given and does nothing else; an environment that
+% may stop answering would need the assumption that it does not.
+forall t: Task . [true* . goal(t)] mu Y . ([!(exists b: Bool . deliver(t, b))] Y && <true> true)

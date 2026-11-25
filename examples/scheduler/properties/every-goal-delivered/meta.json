@@ -1,0 +1,6 @@
+{
+  "title": "Every goal is delivered",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/every-goal-delivered.mcf"
+}

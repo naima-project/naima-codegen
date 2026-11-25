@@ -1,0 +1,2 @@
+% nothing taken after the stop
+[true* . halt . true* . (exists e: Ev . take(e))] false

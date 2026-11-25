@@ -1,0 +1,6 @@
+{
+  "title": "Never more threads than workers",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/threads-within-workers.mcf"
+}

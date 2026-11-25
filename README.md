@@ -71,13 +71,34 @@ parameter's role, every label's kind and argument names, the widths of
 integers and the observables (§3.6). With a policy, each summand of Core
 follows a tag line, `%@input` or `%@order <level>` (§3.5.4).
 
-Three complete projects, with their generated code committed:
+Four complete projects, with their generated code committed:
 [examples/jobqueue](examples/jobqueue), a job queue with a fixed number of
 workers, retries and a give-up rule; [examples/form](examples/form), a form
-that is edited, submitted, sent and answered, made for a user interface; and
+that is edited, submitted, sent and answered, made for a user interface;
 [examples/waits](examples/waits), tasks that wait on each other, with per-task
 wait lists drained from the front, a start order ranked by lists, and a map
-keyed by records that hold lists.
+keyed by records that hold lists; and [examples/scheduler](examples/scheduler), a pool of workers running a task graph, with the generic
+event loop and a program of fake tasks.
+
+## The generic event loop (Rust)
+
+Next to the stepper, a project can have the loop around it generated. With `rust_loop = "scheduler_loop"` in `[project]`, naima-codegen writes
+a crate with a trait `Handlers` (one method per output action of the model, typed from its sorts), a `Context` (one method per input event)
+and an `App` that runs a small generic event loop, the same file for every project. A project writes only its handlers:
+
+```rust
+impl Handlers for Pool {
+    fn start(&mut self, ctx: &Context, task: Task) { /* run it, then ctx.finished(task) */ }
+    fn finish(&mut self, ctx: &Context) { ctx.stop_loop(); }
+    /* ...one method per output action */
+}
+let app = App::new(Config { w: 2 }, Pool::new())?;
+app.context().define(Task(0), vec![]);   // post the first events
+app.run()?;
+```
+
+[examples/scheduler](examples/scheduler) is the pool scheduler of the model-checking example on this loop, with fake tasks; its README lists
+the files a user writes. Changing the actions and events is a change of the model, a regeneration and new handlers.
 
 ## TypeScript and Svelte
 

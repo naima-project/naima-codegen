@@ -1,0 +1,2 @@
+% Each task is run once: the handler of start is called at most once for a task.
+forall t: Task . [true* . start(t) . true* . start(t)] false

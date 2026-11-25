@@ -1,0 +1,13 @@
+# The scheduler program: the two files in src/ are all a user writes. Everything it uses is generated
+# from model/ into ../generated/rust/ (the stepper and, over the generic event loop, the handlers' interface).
+[package]
+name = "scheduler_app"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+scheduler_loop = { path = "../generated/rust/scheduler_loop" }
+
+# A workspace of its own, so that no enclosing Cargo workspace claims this crate.
+[workspace]

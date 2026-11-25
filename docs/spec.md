@@ -617,6 +617,8 @@ keys, every path relative to the project directory unless it says otherwise:
   `Cargo.toml` inherits `version`, `edition`, `rust-version`, `license`, `publish`
   and the lints from the enclosing Cargo workspace; with `false` it is a standalone
   manifest;
+- `rust_loop`: optional, a crate name; with `rust` and a policy, the handler crate and the generic event loop are
+  written to `<generated>/rust/<rust_loop>/` (§3.19). Without the key nothing changes;
 - `python_package`: required with `python`; the package is
   `<generated>/python/<python_package>/__init__.py` (§3.12.1);
 - `typescript_module`: required with `typescript`, letters, digits, `_` and `-`; the
@@ -2027,6 +2029,37 @@ two systems without internal steps the two equivalences coincide; the comparison
 asks for strong bisimulation so that it states what it checks, and so that a label
 lost on either side, which branching bisimulation would read as an internal step,
 fails instead of passing.
+
+### 3.19 The generic event loop (Rust)
+
+Everything around the stepper, the loop that takes an event, steps the model and carries out each action, was written by
+hand in each project. With `rust_loop = "<crate>"` in the `[project]` table (and a policy, so that the stepper of §3.8
+exists) the generator writes a second crate beside the stepper's, `<generated>/rust/<crate>/`, which depends on the
+stepper's crate by path. The stepper's files are what they are without the key: nothing of §3.11 changes, `Event`,
+`Action`, `State` and `step` stay public and byte-identical, and a project without the key gets no new file.
+
+The crate holds two files and a manifest:
+
+- `src/event_loop.rs` is one constant text, the same for every project (a test compares it across models). `Machine` is
+  what a loop steps (`step(event, out)`); `Handler` is what it calls for each action; `Ctx<E>` is a cloneable, sendable
+  handle that posts events (`post_event`) and ends the loop (`stop_loop`); `Loop` holds them with an unbounded queue and
+  `run` takes the events one at a time, in the order they were posted. For each event it steps the machine and calls the
+  handler of each action the step returned, in order, on the loop's own thread, before it takes the next event. The
+  actions returned while the machine was made are handled first. An event the model does not accept ends `run` with the
+  stepper's error; an event posted after the loop has ended is dropped. A handler that has to wait does so elsewhere
+  (a thread, a timer) and posts the outcome as an event.
+- `src/lib.rs` is what the model decides, from its declared labels, their argument names and the Rust types of their
+  sorts: the trait `Handlers`, with one method per output action (`fn <action>(&mut self, ctx: &Context, <args>)`); the
+  type `Context`, with one method per input event (`fn <event>(&self, <args>)`) that posts it; and `App`, made from a
+  `Config` and a value of `Handlers`, with `context()` and `run()`. The stepper crate is re-exported as `model`.
+
+A project then writes only the handlers and a main that posts the first events. Changing its actions and events means
+changing the model, regenerating, and writing the handlers again: `event_loop.rs` is not touched.
+
+The loop is verified in mCRL2 before it is coded: `tests/loop-model/event-loop.mcrl2` models it over an abstract stepper
+(events are taken first in, first out; the actions of a step are handled in order and before the next event; nothing is
+taken after the stop; the loop can always stop; no deadlock before it). The scheduler example's `env.mcrl2` composes the
+real scheduler with the loop, its inbox and its handlers, and `examples/scheduler/model/properties/` holds the properties checked on it.
 
 ## 4. Invariants
 

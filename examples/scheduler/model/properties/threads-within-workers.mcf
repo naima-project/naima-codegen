@@ -1,0 +1,6 @@
+% Never more tasks at a thread than workers: a task is at a thread from the call of its start handler
+% until the thread posts its end (earlier than the scheduler learns of it). The instance has two workers.
+nu X(n: Nat = 0) .
+     (forall t: Task . [start(t)] (val(n < 2) && X(n + 1)))
+  && (forall t: Task . [post_finished(t) || post_failed(t)] X(Int2Nat(n - 1)))
+  && [!(exists t: Task . start(t) || post_finished(t) || post_failed(t))] X(n)

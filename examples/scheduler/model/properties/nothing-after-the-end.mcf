@@ -1,0 +1,3 @@
+% After the scheduler's finish no thread is left and nothing is posted to the inbox, so the loop
+% ends with its queue empty.
+[true* . finish . true* . (exists t: Task . post_finished(t) || post_failed(t))] false

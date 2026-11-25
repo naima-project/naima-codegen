@@ -1,0 +1,60 @@
+# policy.toml -- the pool scheduler's policy (naima-codegen docs/spec.md §3.7.1).
+#
+# Highest priority first: deliver what is finished, then let settled tasks tell those that read them, settle tasks whose inputs failed,
+# then mark tasks ready, then give ready tasks to free workers, and end the run last.
+order = ["c_deliver", "c_tell", "c_abandon", "c_ready", "c_start", "c_finish"]
+
+# Goals that are done or failed and not yet delivered, the oldest first.
+[index.due]
+sort = "Task"
+var = "t"
+bound = "nt"
+member = "isgoal(t) && !told(t) && (st(t) == DONE || st(t) == FAILED)"
+order = "least"
+
+# Waiting tasks that read a failed task.
+[index.doomed]
+sort = "Task"
+var = "t"
+bound = "nt"
+member = "st(t) == WAITING && broken(t)"
+order = "least"
+
+# Done or failed tasks that still have users to tell, the oldest first.
+[index.telling]
+sort = "Task"
+var = "t"
+bound = "nt"
+member = "(st(t) == DONE || st(t) == FAILED) && todo(t) != []"
+order = "least"
+
+# Waiting tasks whose inputs are all done.
+[index.runnable]
+sort = "Task"
+var = "t"
+bound = "nt"
+member = "st(t) == WAITING && missing(t) == 0 && !broken(t)"
+order = "least"
+
+# Ready tasks, the oldest first: the oldest ready task goes to a free worker.
+[index.queued]
+sort = "Task"
+var = "t"
+bound = "nt"
+member = "st(t) == READY"
+order = "least"
+
+[select.c_deliver]
+t = { term = "first(due)", when = "some(due)" }
+
+[select.c_tell]
+t = { term = "first(telling)", when = "some(telling)" }
+
+[select.c_abandon]
+t = { term = "first(doomed)", when = "some(doomed)" }
+
+[select.c_ready]
+t = { term = "first(runnable)", when = "some(runnable)" }
+
+[select.c_start]
+t = { term = "first(queued)", when = "some(queued)" }

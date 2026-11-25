@@ -1,0 +1,6 @@
+{
+  "title": "Each task is run once",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/each-task-run-once.mcf"
+}

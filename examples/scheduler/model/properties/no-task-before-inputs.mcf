@@ -1,0 +1,4 @@
+% No task before its inputs: once a task is given with the tasks it reads, it does not
+% start while one of them has not been reported finished.
+forall t: Task, k: Task .
+  [true* . (exists ks: List(Task) . val(k in ks) && define(t, ks)) . (!finished(k))* . start(t)] false

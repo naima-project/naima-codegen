@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### A generic event loop and handlers, for Rust
+
+With `rust_loop = "<crate>"` in the `[project]` table, naima-codegen writes a second crate beside the unchanged stepper: a trait `Handlers`
+with one method per output action, typed from the model's sorts, a `Context` with one typed method per input event, and an `App` over a
+small generic event loop, the same text for every project (docs/spec.md §3.19). A project writes its handlers and a main, and changes its
+actions and events by changing the model, regenerating and writing new handlers. The example `examples/scheduler` is the scheduler of the
+CAV paper's model-checking example on that loop, with fake tasks. Projects without the key generate the same files as before; the
+manifest's hashes of the generator's own sources changed, so a project's manifest is regenerated once.
+
 ### Portable: it runs through uv, with no Python on the machine
 
 `naima-codegen` and `naima-codegen.cmd` run the tool with `uv run --project`, which downloads the Python that

@@ -22,7 +22,7 @@ _PARAM = {"name", "role", "repr", "width", "sort", "init"}
 _ACTION = {"label", "kind", "args"}
 _OBS = {"name", "arg", "sort", "expr"}
 _PROJECT_PATHS = {"model": "model", "generated": "generated", "catalogue": "catalogue", "properties": None}
-_PROJECT = set(_PROJECT_PATHS) | {"backends", "rust_crate", "rust_package", "rust_workspace", "python_package",
+_PROJECT = set(_PROJECT_PATHS) | {"backends", "rust_crate", "rust_package", "rust_workspace", "rust_loop", "python_package",
                                    "typescript_module"}
 BACKENDS = ("rust", "python", "typescript")
 DEFAULT_BACKENDS = ["rust", "python"]  # what a project without `backends` was always generated
@@ -161,7 +161,7 @@ def _project(t, problems: list) -> dict:
     backends the project chooses, and the names of what each one generates. A
     missing name is a problem only when outputs are written (`missing_names`)."""
     out = dict(_PROJECT_PATHS, backends=list(DEFAULT_BACKENDS), rust_crate=None, rust_package=None,
-               rust_workspace=False, python_package=None, typescript_module=None)
+               rust_workspace=False, rust_loop=None, python_package=None, typescript_module=None)
     if not isinstance(t, dict):
         problems.append(("project", "§3.6.9", "must be a table"))
         return out
@@ -176,6 +176,7 @@ def _project(t, problems: list) -> dict:
                 out[k] = v.rstrip("/")
     for k, pat, what in (("rust_crate", _CRATE, "a crate name (letters, digits, _ and -)"),
                          ("rust_package", _CRATE, "a crate name (letters, digits, _ and -)"),
+                         ("rust_loop", _CRATE, "a crate name (letters, digits, _ and -)"),
                          ("python_package", _PYPKG, "a Python identifier"),
                          ("typescript_module", _TSMOD, "a module name (letters, digits, _ and -)")):
         if k in t:

@@ -1,0 +1,84 @@
+% core.mcrl2 -- a pool scheduler: a fixed number of workers runs a small task graph.
+% One linear process in naima-codegen's form: every summand is
+%   condition -> c_<label>(args) . Core(assignments)
+% and follows a tag line, %@input for what the environment says, %@order <level> for
+% what the scheduler decides itself.
+%
+% Before the run, the environment gives the tasks, each with the earlier tasks it reads,
+% and marks some of them as goals. It then starts the run. From then on the scheduler
+% marks a task ready once everything it reads is done, gives the oldest ready task to a
+% free worker, and delivers each goal once it is done or has failed. The environment
+% reports every task that runs as finished or failed. A task that reads a failed task
+% fails without running.
+
+sort Task = struct task(tx: Nat);                       % the id sort: tasks, oldest first
+sort TSt = struct ABSENT | WAITING | READY | RUNNING | DONE | FAILED;
+
+map below: List(Task) # Nat -> Bool;                    % every task in the list is older than n
+map adduser: List(Task) # Task # (Task -> List(Task)) -> (Task -> List(Task));  % t joins the users of every task in the list
+var kk: Task;  l: List(Task);  n: Nat;  t: Task;  u: Task -> List(Task);
+eqn below([], n) = true;
+    below(kk |> l, n) = (tx(kk) < n) && below(l, n);
+    adduser([], t, u) = u;
+    adduser(kk |> l, t, u) = adduser(l, t, u[kk -> u(kk) <| t]);
+
+act  c_define: Task # List(Task);                         % a task, and the tasks it reads
+     c_goal, c_finished, c_failed: Task;                % a goal; a task reported finished or failed
+     c_run;                                             % the program is complete: start
+     c_ready, c_start, c_abandon: Task;                 % the scheduler's own steps
+     c_tell: Task # Task;                               % a settled task tells one that reads it
+     c_deliver: Task # Bool;                            % a goal's result: true when it is done
+     c_finish;                                          % every goal delivered, nothing left
+
+% w: workers; nt: tasks given; begun: the run has started; ended: the run is finished;
+% free: workers without a task; pending: goals not yet delivered; settled: tasks done or failed;
+% st: where each task stands; kids: the tasks each task reads; isgoal: whether a task is a goal;
+% told: whether a goal's result was delivered; users: the tasks that read each task;
+% missing: how many of the tasks a task reads are not done yet; broken: a task it reads failed;
+% todo: the users a settled task has still to tell
+proc Core(w: Nat, nt: Nat, begun: Bool, ended: Bool, free: Nat, pending: Nat, settled: Nat,
+          st: Task -> TSt, kids: Task -> List(Task), isgoal: Task -> Bool, told: Task -> Bool,
+          users: Task -> List(Task), missing: Task -> Nat, broken: Task -> Bool, todo: Task -> List(Task)) =
+% ---- inputs: the program, before the run
+%@input
+    sum t: Task, ks: List(Task) . (!begun && tx(t) == nt && below(ks, nt)) ->
+      c_define(t, ks) . Core(nt = nt + 1, st = st[t -> WAITING], kids = kids[t -> ks], users = adduser(ks, t, users),
+                             missing = missing[t -> #ks])
+%@input
+  + sum t: Task . (!begun && tx(t) < nt && !isgoal(t)) ->
+      c_goal(t) . Core(isgoal = isgoal[t -> true], pending = pending + 1)
+%@input
+  + (!begun && nt > 0) ->
+      c_run . Core(begun = true)
+% ---- inputs: the workers, during the run
+%@input
+  + sum t: Task . (st(t) == RUNNING) ->
+      c_finished(t) . Core(st = st[t -> DONE], free = free + 1, settled = settled + 1, todo = todo[t -> users(t)])
+%@input
+  + sum t: Task . (st(t) == RUNNING) ->
+      c_failed(t) . Core(st = st[t -> FAILED], free = free + 1, settled = settled + 1, todo = todo[t -> users(t)])
+
+% ---- outputs: the scheduler's decisions
+%@order 1
+  + sum t: Task, b: Bool . (begun && isgoal(t) && !told(t) && (st(t) == DONE || st(t) == FAILED) && b == (st(t) == DONE)) ->
+      c_deliver(t, b) . Core(told = told[t -> true], pending = Int2Nat(pending - 1))
+%@order 2
+  + sum t: Task, v: Task . ((st(t) == DONE || st(t) == FAILED) && todo(t) != [] && v == head(todo(t))) ->
+      c_tell(t, v) . Core(todo = todo[t -> tail(todo(t))],
+                          missing = missing[v -> if(st(t) == DONE, Int2Nat(missing(v) - 1), missing(v))],
+                          broken = broken[v -> broken(v) || st(t) == FAILED])
+%@order 3
+  + sum t: Task . (begun && st(t) == WAITING && broken(t)) ->
+      c_abandon(t) . Core(st = st[t -> FAILED], settled = settled + 1, todo = todo[t -> users(t)])
+%@order 4
+  + sum t: Task . (begun && st(t) == WAITING && missing(t) == 0 && !broken(t)) ->
+      c_ready(t) . Core(st = st[t -> READY])
+%@order 5
+  + sum t: Task . (free > 0 && st(t) == READY) ->
+      c_start(t) . Core(st = st[t -> RUNNING], free = Int2Nat(free - 1))
+%@order 6
+  + (begun && !ended && settled == nt && pending == 0) ->
+      c_finish . Core(ended = true)
+
+%@observers
+  + delta;

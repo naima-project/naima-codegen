@@ -1,0 +1,47 @@
+% event-loop.mcrl2 -- the generic event loop of docs/spec.md §3.19, with the stepper abstracted to the one thing
+% the loop depends on: the actions a step returns (`outs`), in order. The model of the whole example, with the
+% real scheduler in place of `outs`, is examples/scheduler/model/env.mcrl2.
+%
+% The program posts e1 and e2 before the loop runs. The loop takes events one at a time from the inbox (first in,
+% first out), and for each calls the handler of every action the step returned, in order, before it takes the
+% next. The handler of a2 starts a thread, which posts e3 whenever it likes; the handler of a3 stops the loop.
+% The visible actions are post(e), take(e), handle(a) and halt.
+
+sort Ev  = struct e1 | e2 | e3;
+sort Ac  = struct a1 | a2 | a3;
+sort Msg = struct mEv(ev: Ev) ?is_mEv | mStop ?is_mStop;
+
+map  outs: Ev -> List(Ac);
+eqn  outs(e1) = [a1, a2];
+     outs(e2) = [a3];
+     outs(e3) = [];
+
+act  p, s, post: Ev;                       % a post to the inbox: the poster, the inbox, both
+     l_take, i_take, take: Ev;             % the loop takes the head of the inbox
+     l_handle, h_handle, handle: Ac;       % the loop calls a handler
+     l_stop, h_stop, s_stop: Ac;           % the call of the handler of a3, which stops the loop: it posts the stop to the inbox
+     halt;
+
+proc Program = p(e1) . p(e2);
+
+proc Inbox(q: List(Msg)) =
+    sum e: Ev . s(e) . Inbox(q <| mEv(e))
+  + s_stop(a3) . Inbox(q <| mStop)
+  + (q != [] && is_mEv(head(q))) -> i_take(ev(head(q))) . Inbox(tail(q))
+  + (q != [] && is_mStop(head(q))) -> halt . delta;
+
+% the handlers: a2 starts a thread, which posts e3 whenever it likes; a3 stops the loop
+proc Handlers(thread: Bool, posted: Bool) =
+    sum a: Ac . (a != a3) -> h_handle(a) . Handlers(thread = thread || a == a2)
+  + h_stop(a3) . Handlers()
+  + (thread && !posted) -> p(e3) . Handlers(posted = true);
+
+% the loop's own sequence, one event at a time: the handlers of a step run before the next event is taken
+proc Loop = sum e: Ev . l_take(e) . Dispatch(outs(e));
+     Dispatch(l: List(Ac)) = (l == []) -> Loop
+                           + (l != [] && head(l) != a3) -> l_handle(head(l)) . Dispatch(tail(l))
+                           + (l != [] && head(l) == a3) -> l_stop(head(l)) . Dispatch(tail(l));
+
+init allow({take, handle, halt, post},
+         comm({p | s -> post, l_take | i_take -> take, l_handle | h_handle -> handle, l_stop | h_stop | s_stop -> handle},
+           Program || Inbox([]) || Handlers(false, false) || Loop));

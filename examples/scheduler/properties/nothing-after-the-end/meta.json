@@ -1,0 +1,6 @@
+{
+  "title": "Nothing is posted after the run is over",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/nothing-after-the-end.mcf"
+}

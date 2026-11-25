@@ -1,0 +1,6 @@
+{
+  "title": "Never more tasks running than workers",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/never-over-workers.mcf"
+}

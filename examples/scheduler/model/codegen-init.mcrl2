@@ -1,0 +1,4 @@
+% codegen-init.mcrl2 -- the scheduler's initial state: no task, the run not begun. The
+% worker count w = 2 is a placeholder; free is computed from it (codegen.toml, init).
+init Core(2, 0, false, false, 2, 0, 0, lambda t: Task . ABSENT, lambda t: Task . [], lambda t: Task . false, lambda t: Task . false,
+          lambda t: Task . [], lambda t: Task . 0, lambda t: Task . false, lambda t: Task . []);

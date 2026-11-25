@@ -1,0 +1,6 @@
+{
+  "title": "The run never gets stuck before it is over",
+  "group": "small",
+  "verifier": "mcrl2",
+  "property": "model/properties/no-deadlock.mcf"
+}

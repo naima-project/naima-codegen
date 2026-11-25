@@ -1,0 +1,6 @@
+% Never more tasks running than workers. A task is running from start(t) until it is
+% reported finished or failed; the instance has two workers.
+nu X(n: Nat = 0) .
+     (forall t: Task . [start(t)] (val(n < 2) && X(n + 1)))
+  && (forall t: Task . [finished(t) || failed(t)] X(Int2Nat(n - 1)))
+  && [!(exists t: Task . start(t) || finished(t) || failed(t))] X(n)

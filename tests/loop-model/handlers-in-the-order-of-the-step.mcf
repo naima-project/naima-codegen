@@ -1,0 +1,2 @@
+% handlers in the order of the step
+[true* . take(e1) . (!handle(a1))* . handle(a2)] false
