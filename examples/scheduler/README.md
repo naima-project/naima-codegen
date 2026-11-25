@@ -1,17 +1,19 @@
 # The pool scheduler on the generic event loop
 
-The scheduler of the model-checking example in the CAV paper: a pool of workers runs a task graph. The model is the paper's. Here it runs for
+A pool scheduler, a standard example for model checking: a fixed number of workers runs a graph of tasks, each of which reads the results of earlier ones. Here it runs for
 real, on the event loop that naima-codegen generates, with fake tasks: each task prints when it starts and when it ends, and waits a random
 3 to 10 seconds in between.
 
 ## Run it
 
+From the root of the repository, with Rust 1.96.0 installed (`rustup` reads `rust-toolchain.toml` and fetches it):
+
 ```sh
 cargo run --release --manifest-path examples/scheduler/app/Cargo.toml
 ```
 
-It runs five tasks on two workers (tasks 0, 1 and 2 read nothing, task 3 reads 0 and 1, task 4 reads 2 and 3; 3 and 4 are goals) and prints,
-for instance:
+The program runs five tasks on two workers (tasks 0, 1 and 2 read nothing, task 3 reads 0 and 1, task 4 reads 2 and 3; 3 and 4
+are goals). Each task waits a random 3 to 10 seconds, so a run takes about 20 seconds. It prints, for instance:
 
 ```
 [  0.00s] task 0 starts
@@ -23,8 +25,31 @@ for instance:
 [ 21.07s] the run is over
 ```
 
+For a run of about a second, shorten the waits (the times and the order of tasks that end close together vary from run to run):
+
+```sh
+cargo run --release --manifest-path examples/scheduler/app/Cargo.toml -- --min 0.2 --max 0.6 --seed 1
+```
+
+```
+[  0.00s] task 0 starts
+[  0.00s] task 1 starts
+[  0.20s] task 0 ends
+[  0.20s] task 2 starts
+[  0.23s] task 1 ends
+[  0.23s] task 3 starts
+[  0.64s] task 2 ends
+[  0.81s] task 3 ends
+[  0.81s] goal 3 delivered, done
+[  0.81s] task 4 starts
+[  1.22s] task 4 ends
+[  1.22s] goal 4 delivered, done
+[  1.22s] the run is over
+```
+
 Options after `--`: `--workers N` (default 2), `--min S` and `--max S` (the wait in seconds, 3 and 10), `--seed N`.
-It needs only Rust; the generated code is committed.
+It needs only Rust, because the generated code is committed. The page [docs/examples/scheduler.md](../../docs/examples/scheduler.md)
+describes the model and [docs/event-loop.md](../../docs/event-loop.md) the loop.
 
 ## The files a user writes
 
@@ -42,7 +67,7 @@ handlers.
 
 ## The model and what is checked
 
-`model/core.mcrl2`, `model/policy.toml` and `codegen.toml` are the paper's scheduler. `model/env.mcrl2` is its environment as this program
+`model/core.mcrl2`, `model/policy.toml` and `codegen.toml` describe the scheduler. `model/env.mcrl2` is its environment as this program
 has it: the program posts to an inbox (a first-in first-out queue), the loop takes one event at a time and hands it to the scheduler, the
 handler of `start` lets a thread end the task and post `finished`, and the handler of `finish` stops the loop. The properties in
 `model/properties/`, on the refined system `generated/model/systems/small-refined.mcrl2` (485 states, 725 transitions), checked with mCRL2
@@ -76,4 +101,4 @@ mcrl22lps -q generated/model/systems/small-refined.mcrl2 r.lps && lps2lts -q r.l
 lts2pbes -q -f model/properties/each-task-run-once.mcf r.lts p.pbes && pbessolve -q p.pbes
 ```
 
-Regenerate after a change of the model with `naima-codegen generate --project examples/scheduler`.
+Regenerate after a change of the model with `./naima-codegen generate --project examples/scheduler`.

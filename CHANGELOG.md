@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Documentation and one-script reproduction
+
+The README presents the tool on its own: what it does, how to install it with the pinned versions, a quick start, the files a
+project has, the backends and the limits. `docs/` has a reference of every key of `codegen.toml` and `policy.toml`
+(`tests/test_docs.py` checks it against the code), a page on the generic event loop and a page per example, and every
+example has a README with a command and its expected output. `versions.env` pins Python, Rust, mCRL2, Deno, Svelte and
+TypeScript in one place. `scripts/reproduce.sh` and `scripts/reproduce.ps1` go from a fresh clone to a report: they install
+the toolchain, check every example byte-identical with `generate --check`, run the tests and the scheduler demo, and, with
+the mCRL2 tools on `PATH`, the refinement checks and properties; what is skipped is named at the end.
+
 ### A generic event loop and handlers, for Rust
 
 With `rust_loop = "<crate>"` in the `[project]` table, naima-codegen writes a second crate beside the unchanged stepper: a trait `Handlers`
