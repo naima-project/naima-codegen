@@ -35,7 +35,7 @@ class Hashes(unittest.TestCase):
 @unittest.skipUnless(shutil.which("mcrl22lps"), "mcrl22lps is not installed")
 class Check(unittest.TestCase):
     def run_cg(self, *args) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, str(ROOT / "naima-codegen"), *args], capture_output=True, text=True)
+        return subprocess.run([sys.executable, "-m", "naima_codegen", *args], capture_output=True, text=True, cwd=ROOT)
 
     def test_check_holds_when_every_file_has_crlf(self):
         with tempfile.TemporaryDirectory() as d:

@@ -49,7 +49,11 @@ def _python_backend(gen=GEN, package=PACKAGE):
     """The generated Python package of an example, loaded from its file."""
     spec = importlib.util.spec_from_file_location("%s_generated" % package, gen / "python" / package / "__init__.py")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no __pycache__ in generated/
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = keep
     return mod
 
 

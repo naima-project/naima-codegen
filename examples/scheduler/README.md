@@ -58,6 +58,17 @@ handler of `start` lets a thread end the task and post `finished`, and the handl
 | no task starts before the tasks it reads have finished | `no-task-before-inputs.mcf` |
 | nothing is posted after the run is over | `nothing-after-the-end.mcf` |
 
+## Verified
+
+The loop itself is modelled in `tests/loop-model/event-loop.mcrl2` over an abstract stepper and checked with mCRL2 202607.0; these
+properties hold (`tests/loop-model/*.mcf`): `fifo` (events are taken in the order they were posted), `a-step-ends-before-the-next-event`,
+`handlers-in-the-order-of-the-step`, `nothing-taken-after-the-stop`, `the-events-posted-first-are-taken`, `no-deadlock-before-the-stop`
+and `the-loop-can-always-stop`. A last-in first-out inbox makes `fifo` fail.
+
+The scheduler composed with the loop, the inbox and the handlers (`model/env.mcrl2`) satisfies the seven properties of the table above, and
+`naima-codegen check-refinement --project examples/scheduler` (trace inclusion, every step ends, non-blocking, one summand per label,
+receptive) and its `--properties` form both report that every check holds. `tests/test_codegen_loop.py` runs all of these.
+
 Check one by hand, with the mCRL2 tools on `PATH`:
 
 ```sh
