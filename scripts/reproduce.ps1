@@ -72,7 +72,7 @@ try {
   # --- the test suite
   if (-not $NoTests) {
     & $Uv run --frozen --no-dev python -B -m unittest discover -s tests *> "$Out\tests.log"
-    if ($LASTEXITCODE -eq 0) { Ok ("test suite: " + ((Get-Content "$Out\tests.log" -Tail 3) -join " ")) }
+    if ($LASTEXITCODE -eq 0) { Ok ("test suite: " + ((Select-String -Path "$Out\tests.log" -Pattern '^(Ran|OK|FAILED)').Line -join " ")) }
     else { Get-Content "$Out\tests.log" -Tail 40; Bad "test suite" }
     if (-not $HaveMcrl2) { Skip "test suite: the cases that need mCRL2 skip themselves" }
     if (-not (Have "deno")) { Skip "test suite: the TypeScript backend's tests need Deno $($V.DENO)" }

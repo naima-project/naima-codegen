@@ -79,7 +79,7 @@ fi
 # --- the test suite
 if [ $RUN_TESTS = 1 ]; then
   if "$UV" run --frozen --no-dev python -B -m unittest discover -s tests >"$OUT/tests.log" 2>&1; then
-    ok "test suite: $(tail -n 3 "$OUT/tests.log" | tr '\n' ' ')"
+    ok "test suite: $(grep -E '^(Ran|OK|FAILED)' "$OUT/tests.log" | tr '\n' ' ')"
   else tail -n 40 "$OUT/tests.log" >&2; bad "test suite"; fi
   # The test suite skips what needs a missing tool; say so instead of counting a skip as a pass.
   [ $HAVE_MCRL2 = 0 ] && skip "test suite: the cases that need mCRL2 skip themselves"
